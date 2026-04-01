@@ -1,12 +1,9 @@
-# MARS — Mobile Autonomous Robotics Swarm
-
+## Swarmap
 A decentralised swarm robotics system where autonomous robots collaborate to explore and map unknown environments without any central coordinator.
 
-## What is MARS?
+## What is Swarmap?
 
-MARS enables a fleet of mobile robots to work together as a swarm, each exploring different parts of an unknown environment simultaneously. The robots share partial maps only with their immediate neighbours, never requiring a central server or master controller. Through distributed frontier auctions, each robot autonomously decides where to explore next, avoiding wasteful duplication of effort.
-
-The system is designed to be **robust to failures** — even when nearly half the robots fail mid-mission, the remaining swarm adapts and continues mapping. The live browser dashboard lets you watch the map emerge in real-time and adjust swarm parameters dynamically.
+Swarmap enables a fleet of mS
 
 ## Why It Matters
 
