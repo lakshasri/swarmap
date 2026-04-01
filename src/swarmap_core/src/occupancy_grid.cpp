@@ -1,4 +1,5 @@
 #include "swarmap_core/occupancy_grid.hpp"
+#include <algorithm>
 #include <stdexcept>
 
 namespace swarmap {

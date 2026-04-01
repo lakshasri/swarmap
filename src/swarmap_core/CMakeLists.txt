@@ -36,6 +36,7 @@ set(DEPS
 # ── robot_node ────────────────────────────────────────────────────────────────
 add_executable(robot_node
   src/robot_node.cpp
+  src/occupancy_grid.cpp
   src/frontier_explorer.cpp
   src/map_merger.cpp
   src/neighbour_tracker.cpp
@@ -54,10 +55,14 @@ install(TARGETS robot_node
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
 
-  ament_add_gtest(test_grid        test/test_grid.cpp        src/robot_node.cpp src/frontier_explorer.cpp src/map_merger.cpp src/neighbour_tracker.cpp)
-  ament_add_gtest(test_frontier    test/test_frontier.cpp    src/frontier_explorer.cpp)
-  ament_add_gtest(test_merger      test/test_merger.cpp      src/map_merger.cpp)
-  ament_add_gtest(test_auction     test/test_auction.cpp     src/frontier_explorer.cpp)
+  ament_add_gtest(test_grid     test/test_grid.cpp
+    src/occupancy_grid.cpp src/frontier_explorer.cpp src/map_merger.cpp src/neighbour_tracker.cpp)
+  ament_add_gtest(test_frontier test/test_frontier.cpp
+    src/occupancy_grid.cpp src/frontier_explorer.cpp)
+  ament_add_gtest(test_merger   test/test_merger.cpp
+    src/occupancy_grid.cpp src/map_merger.cpp)
+  ament_add_gtest(test_auction  test/test_auction.cpp
+    src/occupancy_grid.cpp src/frontier_explorer.cpp)
 
   foreach(t test_grid test_frontier test_merger test_auction)
     ament_target_dependencies(${t} ${DEPS})

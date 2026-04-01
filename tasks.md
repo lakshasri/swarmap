@@ -1,4 +1,4 @@
-# MARS — Task Assignments
+# Swarmap — Task Assignments
 
 Each person owns a distinct set of files. No two people write to the same source file.
 
