@@ -1,0 +1,50 @@
+# Build artifacts
+build/
+install/
+log/
+*.o
+*.a
+*.so
+*.pyc
+__pycache__/
+*.egg-info/
+dist/
+*.egg
+
+# ROS
+devel/
+.catkin_workspace
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Colcon
+.colcon/
+
+# Results and outputs
+results/
+*.bag
+*.bag.db3
+
+# Node modules
+node_modules/
+*.lock
+
+# Environment
+.env
+.env.local
+venv/
+env/
+
+# Project planning (internal use only)
+plans/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
