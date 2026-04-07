@@ -26,14 +26,17 @@ devel/
 # Colcon
 .colcon/
 
-# Results and outputs
-results/
+# Results and outputs (keep README and empty directory markers)
+results/**
+!results/README.md
+!results/**/.gitkeep
 *.bag
 *.bag.db3
 
 # Node modules
 node_modules/
-*.lock
+# Keep package-lock.json for reproducible npm ci
+yarn.lock
 
 # Environment
 .env
