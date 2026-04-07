@@ -9,6 +9,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(ament_cmake REQUIRED)
+find_package(ament_cmake_python REQUIRED)
+find_package(rclpy REQUIRED)
+find_package(visualization_msgs REQUIRED)
+find_package(lifecycle_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(swarmap_msgs REQUIRED)
@@ -28,6 +32,8 @@ set(DEPS
   sensor_msgs
   geometry_msgs
   std_msgs
+  visualization_msgs
+  lifecycle_msgs
   tf2
   tf2_ros
   tf2_geometry_msgs
@@ -48,6 +54,32 @@ target_include_directories(robot_node PUBLIC
 )
 
 install(TARGETS robot_node
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+# ── map_aggregator_node ───────────────────────────────────────────────────────
+add_executable(map_aggregator_node src/map_aggregator_node.cpp)
+ament_target_dependencies(map_aggregator_node ${DEPS})
+target_include_directories(map_aggregator_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+install(TARGETS map_aggregator_node DESTINATION lib/${PROJECT_NAME})
+
+# ── failure_injector_node ─────────────────────────────────────────────────────
+add_executable(failure_injector_node src/failure_injector_node.cpp)
+ament_target_dependencies(failure_injector_node ${DEPS})
+target_include_directories(failure_injector_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+install(TARGETS failure_injector_node DESTINATION lib/${PROJECT_NAME})
+
+# ── Python nodes (swarm_monitor, param_service) ───────────────────────────────
+ament_python_install_package(${PROJECT_NAME})
+install(PROGRAMS
+  src/swarm_monitor_node.py
+  src/param_service_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
