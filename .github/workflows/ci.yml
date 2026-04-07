@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main, core_nav]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── ROS2 Humble build + test ──────────────────────────────────────────────
+  ros2-build:
+    name: ROS2 Humble — colcon build & test
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up ROS2 Humble
+        uses: ros-tooling/setup-ros@v0.7
+        with:
+          required-ros-distributions: humble
+
+      - name: Install rosdep dependencies
+        run: |
+          source /opt/ros/humble/setup.bash
+          cd Swarmap
+          rosdep update
+          rosdep install --from-paths src --ignore-src -r -y
+
+      - name: Build workspace
+        run: |
+          source /opt/ros/humble/setup.bash
+          cd Swarmap
+          colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
+
+      - name: Run C++ tests
+        run: |
+          source /opt/ros/humble/setup.bash
+          cd Swarmap
+          source install/setup.bash
+          colcon test --packages-select swarmap_core
+          colcon test-result --verbose
+
+  # ── Node.js 20 dashboard build ────────────────────────────────────────────
+  frontend-build:
+    name: Dashboard — npm build
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: Swarmap/src/swarmap_dashboard/package-lock.json
+
+      - name: Install npm dependencies
+        run: npm ci
+        working-directory: Swarmap/src/swarmap_dashboard
+
+      - name: Build dashboard
+        run: npm run build
+        working-directory: Swarmap/src/swarmap_dashboard
