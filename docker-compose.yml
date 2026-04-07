@@ -1,0 +1,70 @@
+version: "3.9"
+
+services:
+
+  # ── ROS2 core + Gazebo simulation ─────────────────────────────────────────
+  ros_core:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: swarmap:humble
+    container_name: swarmap_ros
+    network_mode: host
+    environment:
+      - ROS_DOMAIN_ID=0
+      - DISPLAY=${DISPLAY:-:0}
+      - GAZEBO_MODEL_PATH=/swarmap_ws/src/swarmap_bringup/urdf
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ./results:/swarmap_ws/results
+    command: >
+      bash -c "source /opt/ros/humble/setup.bash &&
+               source /swarmap_ws/install/setup.bash &&
+               ros2 launch swarmap_bringup simulation.launch.py
+                 num_robots:=10 world:=warehouse"
+    restart: on-failure
+
+  # ── rosbridge WebSocket server ────────────────────────────────────────────
+  rosbridge:
+    image: swarmap:humble
+    container_name: swarmap_rosbridge
+    network_mode: host
+    depends_on:
+      - ros_core
+    environment:
+      - ROS_DOMAIN_ID=0
+    command: >
+      bash -c "source /opt/ros/humble/setup.bash &&
+               source /swarmap_ws/install/setup.bash &&
+               ros2 launch rosbridge_server rosbridge_websocket_launch.xml
+                 port:=9090"
+    restart: on-failure
+
+  # ── Dashboard aggregator node ─────────────────────────────────────────────
+  dashboard_backend:
+    image: swarmap:humble
+    container_name: swarmap_dashboard_backend
+    network_mode: host
+    depends_on:
+      - ros_core
+    environment:
+      - ROS_DOMAIN_ID=0
+    command: >
+      bash -c "source /opt/ros/humble/setup.bash &&
+               source /swarmap_ws/install/setup.bash &&
+               ros2 launch swarmap_bringup dashboard.launch.py"
+    restart: on-failure
+
+  # ── Frontend Vite preview server ──────────────────────────────────────────
+  frontend:
+    image: swarmap:humble
+    container_name: swarmap_frontend
+    network_mode: host
+    depends_on:
+      - rosbridge
+    command: >
+      bash -c "npm --prefix /swarmap_ws/src/swarmap_dashboard run build &&
+               npm --prefix /swarmap_ws/src/swarmap_dashboard run preview -- --host 0.0.0.0 --port 5173"
+    ports:
+      - "5173:5173"
+    restart: on-failure
