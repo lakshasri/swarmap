@@ -2,6 +2,7 @@
 #include <cmath>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include <random>
 
@@ -26,6 +27,7 @@
 #include "swarmap_msgs/msg/neighbour_discovery.hpp"
 #include "swarmap_msgs/msg/partial_map.hpp"
 #include "swarmap_msgs/msg/frontier_bid.hpp"
+#include "lifecycle_msgs/msg/transition.hpp"
 
 #include "swarmap_core/occupancy_grid.hpp"
 #include "swarmap_core/frontier_explorer.hpp"
@@ -195,6 +197,12 @@ private:
     float  goal_x_ = 0.0f, goal_y_ = 0.0f;
     bool   has_goal_ = false;
 
+    // Stuck detection
+    double pose_x_last_ = 0.0, pose_y_last_ = 0.0;
+    double last_moved_time_ = 0.0;
+    static constexpr double STUCK_TIMEOUT_S  = 5.0;   // seconds without movement
+    static constexpr double STUCK_DIST_THRESH = 0.05;  // metres — less = stuck
+
     std::unique_ptr<OccupancyGrid>    grid_;
     std::unique_ptr<FrontierExplorer> explorer_;
     std::unique_ptr<MapMerger>        merger_;
@@ -215,6 +223,12 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr    sub_scan_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr        sub_odom_;
     rclcpp::Subscription<swarmap_msgs::msg::NeighbourDiscovery>::SharedPtr sub_disc_;
+
+    // Per-neighbour subscriptions — created dynamically on first discovery
+    std::unordered_map<std::string,
+        rclcpp::Subscription<swarmap_msgs::msg::PartialMap>::SharedPtr>  neighbour_map_subs_;
+    std::unordered_map<std::string,
+        rclcpp::Subscription<swarmap_msgs::msg::FrontierBid>::SharedPtr> neighbour_bid_subs_;
 
     rclcpp::TimerBase::SharedPtr timer_map_, timer_status_, timer_disc_,
                                   timer_explore_, timer_battery_;
@@ -281,6 +295,15 @@ private:
         pose_theta_ = std::atan2(2.0*(q.w*q.z + q.x*q.y),
                                  1.0 - 2.0*(q.y*q.y + q.z*q.z));
         broadcastTF(msg->header.stamp);
+
+        // Update stuck detection
+        double now = get_clock()->now().seconds();
+        double dist = std::hypot(pose_x_ - pose_x_last_, pose_y_ - pose_y_last_);
+        if (dist > STUCK_DIST_THRESH) {
+            pose_x_last_    = pose_x_;
+            pose_y_last_    = pose_y_;
+            last_moved_time_= now;
+        }
     }
 
     void onDiscovery(const swarmap_msgs::msg::NeighbourDiscovery::SharedPtr &msg)
@@ -290,6 +313,38 @@ private:
         tracker_->updateNeighbour(msg->robot_id,
                                    msg->position.x, msg->position.y,
                                    msg->comm_radius, now);
+
+        // Subscribe to this neighbour's map and bids on first contact
+        if (neighbour_map_subs_.count(msg->robot_id) == 0) {
+            const std::string ns = "/" + msg->robot_id;
+            auto qos = rclcpp::QoS(5).reliable();
+
+            neighbour_map_subs_[msg->robot_id] =
+                create_subscription<swarmap_msgs::msg::PartialMap>(
+                    ns + "/map", qos,
+                    [this](swarmap_msgs::msg::PartialMap::SharedPtr m){ onNeighbourMap(m); });
+
+            neighbour_bid_subs_[msg->robot_id] =
+                create_subscription<swarmap_msgs::msg::FrontierBid>(
+                    ns + "/frontier_bid", qos,
+                    [this](swarmap_msgs::msg::FrontierBid::SharedPtr m){ onNeighbourBid(m); });
+
+            RCLCPP_INFO(get_logger(), "[%s] Subscribed to neighbour %s",
+                        robot_id_.c_str(), msg->robot_id.c_str());
+        }
+    }
+
+    void onNeighbourMap(const swarmap_msgs::msg::PartialMap::SharedPtr &msg)
+    {
+        if (state_ == RobotState::FAILED) return;
+        std::unique_lock lock(grid_->mutex);
+        merger_->merge(*grid_, *msg, 0, 0);
+    }
+
+    void onNeighbourBid(const swarmap_msgs::msg::FrontierBid::SharedPtr &msg)
+    {
+        if (msg->robot_id == robot_id_) return;
+        explorer_->recordBid(*msg);
     }
 
     // ── TF broadcast ─────────────────────────────────────────────────────────
@@ -440,6 +495,19 @@ private:
     {
         if (!has_goal_) { state_ = RobotState::EXPLORING; return; }
 
+        // Stuck check — abandon goal if we haven't moved in a while
+        double now = get_clock()->now().seconds();
+        if (last_moved_time_ > 0.0 && (now - last_moved_time_) > STUCK_TIMEOUT_S) {
+            RCLCPP_WARN(get_logger(), "[%s] Stuck — abandoning goal (%.2f, %.2f)",
+                        robot_id_.c_str(), goal_x_, goal_y_);
+            stop();
+            explorer_->markVisited(goal_x_, goal_y_);  // blacklist this frontier
+            has_goal_ = false;
+            last_moved_time_ = now;  // reset so we don't spam
+            state_ = RobotState::EXPLORING;
+            return;
+        }
+
         float dx = goal_x_ - static_cast<float>(pose_x_);
         float dy = goal_y_ - static_cast<float>(pose_y_);
         float dist = std::hypot(dx, dy);
@@ -500,6 +568,13 @@ int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
     auto node = std::make_shared<swarmap::RobotNode>();
+
+    // Auto-configure and activate — no external lifecycle manager required.
+    // Callers can still trigger transitions manually via ros2 lifecycle set.
+    using Transition = lifecycle_msgs::msg::Transition;
+    node->trigger_transition(Transition::TRANSITION_CONFIGURE);
+    node->trigger_transition(Transition::TRANSITION_ACTIVATE);
+
     rclcpp::spin(node->get_node_base_interface());
     rclcpp::shutdown();
     return 0;
