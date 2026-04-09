@@ -76,12 +76,12 @@ export default function ReplayPanel() {
   const intervalRef                  = useRef<ReturnType<typeof setInterval> | null>(null)
   const fileInputRef                 = useRef<HTMLInputElement>(null)
 
-  // Playback tick
+  
   useEffect(() => {
     if (intervalRef.current) clearInterval(intervalRef.current)
     if (!playing || !mission) return
 
-    const baseFps = 2  // assume 2 frames/sec in recording
+    const baseFps = 2  
     const intervalMs = 1000 / (baseFps * speed)
     intervalRef.current = setInterval(() => {
       setFrameIdx(i => {
@@ -122,7 +122,7 @@ export default function ReplayPanel() {
 
   return (
     <div style={s.root}>
-      {/* Drop zone */}
+      {}
       <div
         style={s.dropzone(dragOver)}
         onDragOver={e => { e.preventDefault(); setDragOver(true) }}
@@ -145,14 +145,14 @@ export default function ReplayPanel() {
 
       {mission && (
         <>
-          {/* Metadata */}
+          {}
           <div style={s.info}>
             {mission.metadata.world} — {mission.metadata.num_robots} robots
             <br />recorded {mission.metadata.recorded_at}
             <br />{mission.frames.length} frames
           </div>
 
-          {/* Scrubber */}
+          {}
           <input
             type="range"
             style={s.scrubber}
@@ -162,7 +162,7 @@ export default function ReplayPanel() {
             onChange={e => { setFrameIdx(Number(e.target.value)); setPlaying(false) }}
           />
 
-          {/* Frame info */}
+          {}
           {frame && (
             <div style={s.info}>
               t = {frame.time_s.toFixed(1)} s &nbsp;|&nbsp;
@@ -171,7 +171,7 @@ export default function ReplayPanel() {
             </div>
           )}
 
-          {/* Controls */}
+          {}
           <div style={s.controls}>
             <button style={s.btn} onClick={() => setFrameIdx(0)}>⏮</button>
             <button style={s.btn} onClick={() => setPlaying(p => !p)}>
