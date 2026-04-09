@@ -3,9 +3,6 @@
 
 using namespace swarmap;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Construction
-// ─────────────────────────────────────────────────────────────────────────────
 TEST(OccupancyGridTest, InitialisedUnknown)
 {
     OccupancyGrid g(10, 10, 0.1f, 0.0f, 0.0f);
@@ -22,13 +19,10 @@ TEST(OccupancyGridTest, DimensionsCorrect)
     EXPECT_FLOAT_EQ(g.resolution(), 0.1f);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Log-odds update
-// ─────────────────────────────────────────────────────────────────────────────
 TEST(OccupancyGridTest, FreeCellUpdate)
 {
     OccupancyGrid g(10, 10, 0.1f);
-    // Apply several free updates — cell should become FREE
+    
     for (int i = 0; i < 5; ++i)
         g.updateCell(5, 5, LOG_ODDS_FREE);
     EXPECT_EQ(g.getCellRos(5, 5), CELL_FREE);
@@ -45,16 +39,13 @@ TEST(OccupancyGridTest, OccupiedCellUpdate)
 TEST(OccupancyGridTest, LogOddsClampedAtMax)
 {
     OccupancyGrid g(10, 10, 0.1f);
-    // Apply many occupied updates — should not overflow
+    
     for (int i = 0; i < 100; ++i)
         g.updateCell(0, 0, LOG_ODDS_OCCUPIED);
     EXPECT_EQ(g.getCellRos(0, 0), CELL_OCCUPIED);
     EXPECT_GE(g.getCellConfidence(0, 0), 0.9f);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// World ↔ grid coordinate conversion
-// ─────────────────────────────────────────────────────────────────────────────
 TEST(OccupancyGridTest, WorldToGridRoundTrip)
 {
     OccupancyGrid g(100, 100, 0.1f, -5.0f, -5.0f);
@@ -62,7 +53,7 @@ TEST(OccupancyGridTest, WorldToGridRoundTrip)
     ASSERT_TRUE(g.worldToGrid(0.0f, 0.0f, gx, gy));
     float wx, wy;
     g.gridToWorld(gx, gy, wx, wy);
-    EXPECT_NEAR(wx, 0.05f, 0.05f);   // cell centre tolerance
+    EXPECT_NEAR(wx, 0.05f, 0.05f);   
     EXPECT_NEAR(wy, 0.05f, 0.05f);
 }
 
@@ -74,9 +65,6 @@ TEST(OccupancyGridTest, OutOfBoundsReturnsFalse)
     EXPECT_FALSE(g.worldToGrid(0.0f, 999.0f, gx, gy));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Dirty flags
-// ─────────────────────────────────────────────────────────────────────────────
 TEST(OccupancyGridTest, DirtyFlagSetOnUpdate)
 {
     OccupancyGrid g(10, 10, 0.1f);
@@ -101,9 +89,6 @@ TEST(OccupancyGridTest, MarkAllDirty)
             EXPECT_TRUE(g.isCellDirty(x, y));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Mapped cell count
-// ─────────────────────────────────────────────────────────────────────────────
 TEST(OccupancyGridTest, MappedCountStartsZero)
 {
     OccupancyGrid g(10, 10, 0.1f);
