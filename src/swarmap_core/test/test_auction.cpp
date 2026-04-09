@@ -4,7 +4,6 @@
 
 using namespace swarmap;
 
-// Helper — build a FrontierBid message
 static swarmap_msgs::msg::FrontierBid makeBid(
     const std::string &robot_id, float score,
     float cx, float cy, bool claim = true, double stamp_s = 100.0)
@@ -20,22 +19,16 @@ static swarmap_msgs::msg::FrontierBid makeBid(
     return b;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Single robot — always wins
-// ─────────────────────────────────────────────────────────────────────────────
 TEST(AuctionTest, SingleRobotAlwaysWins)
 {
     FrontierExplorer ex(1.0f, 2.0f, 5.0f);
     EXPECT_TRUE(ex.winsAuction("robot_0", 3.5f, 1.0f, 1.0f));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Lower score wins
-// ─────────────────────────────────────────────────────────────────────────────
 TEST(AuctionTest, LowerScoreWins)
 {
     FrontierExplorer ex(1.0f, 2.0f, 5.0f);
-    // Neighbour has higher score → we win
+    
     ex.recordBid(makeBid("robot_1", 5.0f, 1.0f, 1.0f));
     EXPECT_TRUE(ex.winsAuction("robot_0", 3.0f, 1.0f, 1.0f));
 }
@@ -43,18 +36,15 @@ TEST(AuctionTest, LowerScoreWins)
 TEST(AuctionTest, HigherScoreLoses)
 {
     FrontierExplorer ex(1.0f, 2.0f, 5.0f);
-    // Neighbour has lower score → we lose
+    
     ex.recordBid(makeBid("robot_1", 2.0f, 1.0f, 1.0f));
     EXPECT_FALSE(ex.winsAuction("robot_0", 3.0f, 1.0f, 1.0f));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tie-breaking by robot ID (lexicographic)
-// ─────────────────────────────────────────────────────────────────────────────
 TEST(AuctionTest, TieBreakHigherIdLoses)
 {
     FrontierExplorer ex(1.0f, 2.0f, 5.0f);
-    // "robot_1" < "robot_9" lexicographically, so robot_9 loses a tie
+    
     ex.recordBid(makeBid("robot_1", 3.0f, 1.0f, 1.0f));
     EXPECT_FALSE(ex.winsAuction("robot_9", 3.0f, 1.0f, 1.0f));
 }
@@ -66,47 +56,38 @@ TEST(AuctionTest, TieBreakLowerIdWins)
     EXPECT_TRUE(ex.winsAuction("robot_1", 3.0f, 1.0f, 1.0f));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Bid targeting a different frontier is ignored
-// ─────────────────────────────────────────────────────────────────────────────
 TEST(AuctionTest, BidForDifferentFrontierIgnored)
 {
     FrontierExplorer ex(1.0f, 2.0f, 5.0f);
-    // Neighbour bids on a frontier far away
+    
     ex.recordBid(makeBid("robot_1", 1.0f, 20.0f, 20.0f));
-    // We bid on a nearby frontier — should still win
+    
     EXPECT_TRUE(ex.winsAuction("robot_0", 3.0f, 1.0f, 1.0f));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Released bid (claim=false) removes competitor
-// ─────────────────────────────────────────────────────────────────────────────
 TEST(AuctionTest, ReleasedBidAllowsWin)
 {
     FrontierExplorer ex(1.0f, 2.0f, 5.0f);
-    ex.recordBid(makeBid("robot_1", 1.0f, 1.0f, 1.0f));  // robot_1 claims
+    ex.recordBid(makeBid("robot_1", 1.0f, 1.0f, 1.0f));  
     EXPECT_FALSE(ex.winsAuction("robot_0", 3.0f, 1.0f, 1.0f));
 
-    ex.recordBid(makeBid("robot_1", 0.0f, 1.0f, 1.0f, /*claim=*/false));  // releases
+    ex.recordBid(makeBid("robot_1", 0.0f, 1.0f, 1.0f, false));  
     EXPECT_TRUE(ex.winsAuction("robot_0", 3.0f, 1.0f, 1.0f));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Bid expiry
-// ─────────────────────────────────────────────────────────────────────────────
 TEST(AuctionTest, ExpiredBidNoLongerBlocks)
 {
     FrontierExplorer ex(1.0f, 2.0f, 5.0f);
-    ex.recordBid(makeBid("robot_1", 1.0f, 1.0f, 1.0f, true, 0.0));  // old bid at t=0
-    ex.expireBids(10.0, 2.0);   // now = 10s, timeout = 2s → bid is stale
+    ex.recordBid(makeBid("robot_1", 1.0f, 1.0f, 1.0f, true, 0.0));  
+    ex.expireBids(10.0, 2.0);   
     EXPECT_TRUE(ex.winsAuction("robot_0", 3.0f, 1.0f, 1.0f));
 }
 
 TEST(AuctionTest, FreshBidStillBlocks)
 {
     FrontierExplorer ex(1.0f, 2.0f, 5.0f);
-    ex.recordBid(makeBid("robot_1", 1.0f, 1.0f, 1.0f, true, 9.5));  // recent bid
-    ex.expireBids(10.0, 2.0);   // not yet expired
+    ex.recordBid(makeBid("robot_1", 1.0f, 1.0f, 1.0f, true, 9.5));  
+    ex.expireBids(10.0, 2.0);   
     EXPECT_FALSE(ex.winsAuction("robot_0", 3.0f, 1.0f, 1.0f));
 }
 
