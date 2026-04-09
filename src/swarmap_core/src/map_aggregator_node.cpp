@@ -66,9 +66,9 @@ public:
         global_map_.info.origin.orientation.w = 1.0;
         global_map_.data.assign(static_cast<size_t>(w * h), -1);
 
-        
         cell_prob_sum_.assign(static_cast<size_t>(w * h), 0.0f);
         cell_conf_sum_.assign(static_cast<size_t>(w * h), 0.0f);
+        visit_counts_.assign(static_cast<size_t>(w * h), 0);
 
         auto qos_reliable = rclcpp::QoS(10).reliable();
         auto qos_best     = rclcpp::QoS(10).best_effort();
@@ -76,6 +76,8 @@ public:
         
         pub_map_  = create_publisher<nav_msgs::msg::OccupancyGrid>(
                         "/swarm/global_map", rclcpp::QoS(1).transient_local());
+        pub_conf_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
+                        "/dashboard/confidence_map", rclcpp::QoS(1).transient_local());
         pub_stats_= create_publisher<std_msgs::msg::String>(
                         "/dashboard/stats",  qos_reliable);
         pub_events_= create_publisher<std_msgs::msg::String>(
@@ -110,9 +112,10 @@ public:
 private:
     
     nav_msgs::msg::OccupancyGrid global_map_;
-    std::vector<float> cell_prob_sum_;   
-    std::vector<float> cell_conf_sum_;   
-    std::mutex         grid_mutex_;
+    std::vector<float>   cell_prob_sum_;
+    std::vector<float>   cell_conf_sum_;
+    std::vector<uint8_t> visit_counts_;
+    std::mutex           grid_mutex_;
 
     
     std::unordered_map<std::string, RobotInfo> robots_;
@@ -120,6 +123,7 @@ private:
 
     
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr   pub_map_;
+    rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr   pub_conf_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr          pub_stats_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr          pub_events_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_markers_;
@@ -153,6 +157,7 @@ private:
                 int idx = gy * W + gx;
                 cell_prob_sum_[idx] += conf * p;
                 cell_conf_sum_[idx] += conf;
+                if (visit_counts_[idx] < 255) ++visit_counts_[idx];
             }
         }
     }
@@ -177,6 +182,7 @@ private:
         rebuildGlobalMap();
         publishStats();
         pub_map_->publish(global_map_);
+        publishConfidenceMap();
     }
 
     void rebuildGlobalMap()
@@ -231,6 +237,21 @@ private:
         std_msgs::msg::String out;
         out.data = oss.str();
         pub_stats_->publish(out);
+    }
+
+    void publishConfidenceMap()
+    {
+        nav_msgs::msg::OccupancyGrid cmap;
+        cmap.header = global_map_.header;
+        cmap.info   = global_map_.info;
+        const size_t N = visit_counts_.size();
+        cmap.data.resize(N);
+        std::lock_guard lock(grid_mutex_);
+        for (size_t i = 0; i < N; ++i) {
+            uint8_t v = visit_counts_[i];
+            cmap.data[i] = (v == 0) ? -1 : static_cast<int8_t>(std::min<int>(v * 33, 100));
+        }
+        pub_conf_->publish(cmap);
     }
 
     float computeCoverage() const
