@@ -80,6 +80,7 @@ ament_python_install_package(${PROJECT_NAME})
 install(PROGRAMS
   src/swarm_monitor_node.py
   src/param_service_node.py
+  src/robot_spawner_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
