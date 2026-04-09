@@ -82,8 +82,8 @@ export default function ControlPanel({ ros }: Props) {
         parameters: [{
           name: param,
           value: typeof value === 'number'
-            ? { type: 3 /* DOUBLE */, double_value: value }
-            : { type: 4 /* STRING */, string_value: value },
+            ? { type: 3 , double_value: value }
+            : { type: 4 , string_value: value },
         }],
       })
     } catch (e) {
@@ -95,13 +95,13 @@ export default function ControlPanel({ ros }: Props) {
 
   const sendMissionCmd = async (cmd: string) => {
     if (!ros) return
-    // Map mission commands to param toggles
+    
     if (cmd === 'start') {
       await sendParam('exploration_enabled', 1)
     } else if (cmd === 'pause') {
       await sendParam('exploration_enabled', 0)
     } else if (cmd === 'reset') {
-      // Notify via set_param — actual reset requires relaunch
+      
       console.log('reset requested')
     }
   }
