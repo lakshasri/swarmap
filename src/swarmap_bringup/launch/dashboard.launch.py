@@ -12,10 +12,9 @@ def generate_launch_description():
     rosbridge_params = os.path.join(bringup_share, 'config', 'rosbridge_params.yaml')
 
     return LaunchDescription([
-        DeclareLaunchArgument('num_robots',    default_value='10'),
-        DeclareLaunchArgument('dashboard_port',default_value='5173'),
+        DeclareLaunchArgument('num_robots', default_value='10'),
+        DeclareLaunchArgument('dashboard_port', default_value='5173'),
 
-        # ── rosbridge WebSocket server ────────────────────────────────────────
         Node(
             package='rosbridge_server',
             executable='rosbridge_websocket',
@@ -24,7 +23,6 @@ def generate_launch_description():
             output='screen',
         ),
 
-        # ── map_aggregator_node ───────────────────────────────────────────────
         Node(
             package='swarmap_core',
             executable='map_aggregator_node',
@@ -32,12 +30,11 @@ def generate_launch_description():
             parameters=[
                 os.path.join(bringup_share, 'config', 'default_params.yaml'),
                 {'use_sim_time': True,
-                 'num_robots':   LaunchConfiguration('num_robots')},
+                 'num_robots': LaunchConfiguration('num_robots')},
             ],
             output='screen',
         ),
 
-        # ── Vite preview server (npm run preview) ─────────────────────────────
         ExecuteProcess(
             cmd=[
                 'npm', 'run', 'preview', '--',
