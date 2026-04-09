@@ -17,9 +17,9 @@ void OccupancyGrid::updateCell(int gx, int gy, float log_odds_update)
     Cell &c = cells_[idx(gx, gy)];
     c.log_odds = std::clamp(c.log_odds + log_odds_update, LOG_ODDS_MIN, LOG_ODDS_MAX);
 
-    // Map log-odds to probability, use as confidence
+    
     float p = 1.0f / (1.0f + std::exp(-c.log_odds));
-    c.confidence = std::abs(p - 0.5f) * 2.0f;   // 0 = uncertain, 1 = certain
+    c.confidence = std::abs(p - 0.5f) * 2.0f;   
     c.dirty = true;
 }
 
@@ -31,7 +31,7 @@ int8_t OccupancyGrid::getCellRos(int gx, int gy) const
     float p = 1.0f / (1.0f + std::exp(-lo));
     if (p > 0.6f) return CELL_OCCUPIED;
     if (p < 0.4f) return CELL_FREE;
-    return CELL_UNKNOWN;   // ambiguous
+    return CELL_UNKNOWN;   
 }
 
 float OccupancyGrid::getCellConfidence(int gx, int gy) const
@@ -78,4 +78,4 @@ int OccupancyGrid::mappedCellCount() const
     return count;
 }
 
-} // namespace swarmap
+}
