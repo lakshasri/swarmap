@@ -1,13 +1,3 @@
-#!/usr/bin/env python3
-"""
-swarm_monitor_node.py
-
-Subscribes to all /robot_*/status topics, tracks heartbeat timestamps,
-detects stale robots (no ping > 3 s), publishes:
-  /swarm/health             — JSON summary at 1 Hz
-  /dashboard/network_topology — adjacency-list JSON at 1 Hz
-"""
-
 import json
 import time
 import rclpy
@@ -17,7 +7,7 @@ from swarmap_msgs.msg import RobotStatus, NeighbourDiscovery
 
 
 class SwarmMonitorNode(Node):
-    STALE_TIMEOUT = 3.0   # seconds without a ping → declared stale
+    STALE_TIMEOUT = 3.0
 
     def __init__(self):
         super().__init__('swarm_monitor_node')
@@ -27,16 +17,11 @@ class SwarmMonitorNode(Node):
         n = self.get_parameter('num_robots').value
         self._warn_frac = self.get_parameter('warn_below_fraction').value
 
-        # {robot_id: {'last_seen': float, 'state': str, 'battery': float,
-        #             'neighbours': list[str], 'x': float, 'y': float}}
         self._robots: dict[str, dict] = {}
-        self._lock_free = True  # Python GIL is sufficient
 
-        # Publishers
         self._pub_health = self.create_publisher(String, '/swarm/health', 10)
-        self._pub_topo   = self.create_publisher(String, '/dashboard/network_topology', 10)
+        self._pub_topo = self.create_publisher(String, '/dashboard/network_topology', 10)
 
-        # Subscribe to every robot's status
         for i in range(n):
             rid = f'robot_{i}'
             self._robots[rid] = {
@@ -44,7 +29,8 @@ class SwarmMonitorNode(Node):
                 'state': 'UNKNOWN',
                 'battery': 1.0,
                 'neighbours': [],
-                'x': 0.0, 'y': 0.0,
+                'x': 0.0,
+                'y': 0.0,
             }
             self.create_subscription(
                 RobotStatus,
@@ -53,7 +39,6 @@ class SwarmMonitorNode(Node):
                 10,
             )
 
-        # Subscribe to discovery pings for position updates
         self.create_subscription(
             NeighbourDiscovery,
             '/swarm/discovery',
@@ -64,16 +49,15 @@ class SwarmMonitorNode(Node):
         self.create_timer(1.0, self._publish_all)
         self.get_logger().info(f'SwarmMonitor tracking {n} robots')
 
-    # ── Callbacks ──────────────────────────────────────────────────────────────
     def _make_status_cb(self, robot_id: str):
         def cb(msg: RobotStatus):
             r = self._robots.setdefault(robot_id, {})
-            r['last_seen']  = self.get_clock().now().nanoseconds * 1e-9
-            r['state']      = msg.current_state
-            r['battery']    = float(msg.battery_level)
+            r['last_seen'] = self.get_clock().now().nanoseconds * 1e-9
+            r['state'] = msg.current_state
+            r['battery'] = float(msg.battery_level)
             r['neighbours'] = list(msg.neighbour_ids)
-            r['x']          = msg.pose.position.x
-            r['y']          = msg.pose.position.y
+            r['x'] = msg.pose.position.x
+            r['y'] = msg.pose.position.y
         return cb
 
     def _on_discovery(self, msg: NeighbourDiscovery):
@@ -85,7 +69,6 @@ class SwarmMonitorNode(Node):
         r.setdefault('battery', 1.0)
         r.setdefault('neighbours', [])
 
-    # ── Publish ────────────────────────────────────────────────────────────────
     def _publish_all(self):
         now = self.get_clock().now().nanoseconds * 1e-9
         active, stale = [], []
@@ -101,10 +84,9 @@ class SwarmMonitorNode(Node):
         active_frac = len(active) / max(total, 1)
         if active_frac < self._warn_frac:
             self.get_logger().warning(
-                f'Active robots {len(active)}/{total} below {self._warn_frac*100:.0f}% threshold'
+                f'Active robots {len(active)}/{total} below {self._warn_frac * 100:.0f}% threshold'
             )
 
-        # /swarm/health
         health = {
             'timestamp': now,
             'active_robots': active,
@@ -116,7 +98,6 @@ class SwarmMonitorNode(Node):
         msg.data = json.dumps(health)
         self._pub_health.publish(msg)
 
-        # /dashboard/network_topology — adjacency list with positions
         nodes = []
         edges = []
         seen_edges: set[tuple[str, str]] = set()
@@ -149,7 +130,7 @@ def main():
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+    rclpy.shutdown()
 
 
 if __name__ == '__main__':
