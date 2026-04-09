@@ -52,7 +52,7 @@ export default function NetworkGraph({ ros, style }: Props) {
       return
     }
 
-    // Compute bounding box to fit canvas
+    
     const xs = topo.nodes.map(n => n.x)
     const ys = topo.nodes.map(n => n.y)
     const minX = Math.min(...xs), maxX = Math.max(...xs)
@@ -68,7 +68,7 @@ export default function NetworkGraph({ ros, style }: Props) {
 
     const nodeMap = new Map(topo.nodes.map(n => [n.id, n]))
 
-    // Draw edges
+    
     for (const e of topo.edges) {
       const src = nodeMap.get(e.source)
       const tgt = nodeMap.get(e.target)
@@ -85,7 +85,7 @@ export default function NetworkGraph({ ros, style }: Props) {
       ctx.stroke()
     }
 
-    // Draw nodes
+    
     topo.nodes.forEach((node, i) => {
       const [cx, cy] = toCanvas(node.x, node.y)
       const color = ROBOT_COLORS[i % ROBOT_COLORS.length]
@@ -96,7 +96,7 @@ export default function NetworkGraph({ ros, style }: Props) {
       ctx.fill()
 
       if (node.failed) {
-        // ✕ overlay
+        
         ctx.strokeStyle = '#e05252'
         ctx.lineWidth = 2
         ctx.beginPath()
@@ -105,7 +105,7 @@ export default function NetworkGraph({ ros, style }: Props) {
         ctx.stroke()
       }
 
-      // ID label
+      
       ctx.fillStyle = 'var(--text-primary)'
       ctx.font = '9px monospace'
       ctx.textAlign = 'center'
