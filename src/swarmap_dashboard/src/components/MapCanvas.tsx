@@ -2,8 +2,6 @@ import React, { useRef, useEffect, useCallback, CSSProperties } from 'react'
 import ROSLIB from 'roslib'
 import { useRosTopic } from '../hooks/useRosBridge'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
 interface OccupancyGrid {
   info: {
     resolution: number
@@ -23,7 +21,6 @@ interface Props {
   style?: CSSProperties
 }
 
-// ── Colours ───────────────────────────────────────────────────────────────────
 const CELL_UNKNOWN  = 'rgba(60,62,70,1)'
 const CELL_FREE     = 'rgba(220,222,226,1)'
 const CELL_OCCUPIED = 'rgba(30,32,40,1)'
@@ -35,7 +32,6 @@ const ROBOT_COLORS = [
   '#ff8c42','#6ef4d4',
 ]
 
-// ── Component ─────────────────────────────────────────────────────────────────
 export default function MapCanvas({ ros, style }: Props) {
   const canvasRef  = useRef<HTMLCanvasElement>(null)
   const viewRef    = useRef({ offsetX: 0, offsetY: 0, scale: 4 })
@@ -44,7 +40,7 @@ export default function MapCanvas({ ros, style }: Props) {
   const grid  = useRosTopic<OccupancyGrid>(ros, '/swarm/global_map', 'nav_msgs/OccupancyGrid')
   const stats = useRosTopic<DashboardStats>(ros, '/dashboard/stats', 'std_msgs/String')
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  
   const render = useCallback(() => {
     const canvas = canvasRef.current
     if (!canvas || !grid) return
@@ -56,7 +52,7 @@ export default function MapCanvas({ ros, style }: Props) {
 
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-    // Draw cells
+    
     for (let gy = 0; gy < height; ++gy) {
       for (let gx = 0; gx < width; ++gx) {
         const val = grid.data[gy * width + gx]
@@ -72,21 +68,21 @@ export default function MapCanvas({ ros, style }: Props) {
       }
     }
 
-    // Draw robots from stats
+    
     let parsedStats: DashboardStats | null = null
     try {
       if (stats) {
         const data = (stats as unknown as { data: string }).data
         parsedStats = JSON.parse(data) as DashboardStats
       }
-    } catch { /* ignore */ }
+    } catch {  }
 
     if (parsedStats && grid) {
       const { width: gw, height: gh, resolution, origin } = grid.info
       const originX = origin.position.x
       const originY = origin.position.y
 
-      // world → canvas: flip Y (ROS Y-up, canvas Y-down)
+      
       const worldToCanvas = (wx: number, wy: number): [number, number] => {
         const gx = (wx - originX) / resolution
         const gy = (wy - originY) / resolution
@@ -100,7 +96,7 @@ export default function MapCanvas({ ros, style }: Props) {
         const [cx, cy] = worldToCanvas(r.x ?? 0, r.y ?? 0)
         const color = ROBOT_COLORS[i % ROBOT_COLORS.length]
 
-        // Trajectory dot
+        
         ctx.beginPath()
         ctx.arc(cx, cy, 5, 0, Math.PI * 2)
         ctx.fillStyle = color
@@ -109,7 +105,7 @@ export default function MapCanvas({ ros, style }: Props) {
         ctx.lineWidth = 1
         ctx.stroke()
 
-        // ID label
+        
         ctx.fillStyle = '#fff'
         ctx.font = 'bold 9px monospace'
         ctx.textAlign = 'center'
@@ -117,8 +113,8 @@ export default function MapCanvas({ ros, style }: Props) {
       })
     }
 
-    // Scale bar
-    const barCells = Math.round(1.0 / resolution)  // 1 metre
+    
+    const barCells = Math.round(1.0 / resolution)  
     const barPx    = barCells * scale
     ctx.fillStyle = '#fff'
     ctx.fillRect(10, canvas.height - 20, barPx, 3)
@@ -126,10 +122,10 @@ export default function MapCanvas({ ros, style }: Props) {
     ctx.fillText('1 m', 10 + barPx + 4, canvas.height - 15)
   }, [grid, stats])
 
-  // Re-render on new data
+  
   useEffect(() => { render() }, [render])
 
-  // Resize canvas to fill container
+  
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -142,7 +138,7 @@ export default function MapCanvas({ ros, style }: Props) {
     return () => observer.disconnect()
   }, [render])
 
-  // ── Pan / Zoom ─────────────────────────────────────────────────────────────
+  
   const onMouseDown = (e: React.MouseEvent) => {
     dragging.current = {
       sx: e.clientX, sy: e.clientY,
