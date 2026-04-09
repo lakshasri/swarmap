@@ -1,12 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-// roslib is loaded as a UMD global in index.html or via npm
+
 import ROSLIB from 'roslib'
 
 const WS_URL = 'ws://localhost:9090'
 
-// ─────────────────────────────────────────────────────────────────────────────
-// useRosBridge — connects to rosbridge and returns the shared ROSLIB.Ros instance
-// ─────────────────────────────────────────────────────────────────────────────
 export interface RosBridgeState {
   ros: ROSLIB.Ros | null
   connected: boolean
@@ -41,9 +38,6 @@ export function useRosBridge(): RosBridgeState {
   return { ros: rosRef.current, connected, error }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// useRosTopic — subscribes to a ROS topic and returns the latest message
-// ─────────────────────────────────────────────────────────────────────────────
 export function useRosTopic<T>(
   ros: ROSLIB.Ros | null,
   name: string,
@@ -65,9 +59,6 @@ export function useRosTopic<T>(
   return msg
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// callRosService — calls a ROS service and returns a Promise
-// ─────────────────────────────────────────────────────────────────────────────
 export function callRosService<Req, Res>(
   ros: ROSLIB.Ros,
   name: string,
