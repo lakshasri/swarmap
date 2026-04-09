@@ -20,9 +20,6 @@ using namespace std::chrono_literals;
 
 namespace swarmap {
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Small JSON helpers (no external dependency)
-// ─────────────────────────────────────────────────────────────────────────────
 static std::string jsonStr(const std::string &s)
 {
     return "\"" + s + "\"";
@@ -32,9 +29,6 @@ static std::string jsonKV(const std::string &k, const std::string &v)
     return jsonStr(k) + ":" + v;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Per-robot state cache
-// ─────────────────────────────────────────────────────────────────────────────
 struct RobotInfo {
     std::string id;
     bool        is_active   = true;
@@ -46,9 +40,6 @@ struct RobotInfo {
     double      y           = 0.0;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MapAggregatorNode
-// ─────────────────────────────────────────────────────────────────────────────
 class MapAggregatorNode : public rclcpp::Node {
 public:
     MapAggregatorNode()
@@ -65,7 +56,7 @@ public:
         int   w   = static_cast<int>(get_parameter("map_width_m").as_double()  / res);
         int   h   = static_cast<int>(get_parameter("map_height_m").as_double() / res);
 
-        // Initialise global grid
+        
         global_map_.header.frame_id    = "map";
         global_map_.info.resolution    = res;
         global_map_.info.width         = static_cast<uint32_t>(w);
@@ -75,14 +66,14 @@ public:
         global_map_.info.origin.orientation.w = 1.0;
         global_map_.data.assign(static_cast<size_t>(w * h), -1);
 
-        // Per-cell accumulator: probability × weight sums
+        
         cell_prob_sum_.assign(static_cast<size_t>(w * h), 0.0f);
         cell_conf_sum_.assign(static_cast<size_t>(w * h), 0.0f);
 
         auto qos_reliable = rclcpp::QoS(10).reliable();
         auto qos_best     = rclcpp::QoS(10).best_effort();
 
-        // Publishers
+        
         pub_map_  = create_publisher<nav_msgs::msg::OccupancyGrid>(
                         "/swarm/global_map", rclcpp::QoS(1).transient_local());
         pub_stats_= create_publisher<std_msgs::msg::String>(
@@ -92,7 +83,7 @@ public:
         pub_markers_= create_publisher<visualization_msgs::msg::MarkerArray>(
                         "/swarm/frontier_markers", qos_best);
 
-        // Subscribe to all robot topics
+        
         for (int i = 0; i < n; ++i) {
             const std::string id = "robot_" + std::to_string(i);
             const std::string ns = "/" + id;
@@ -117,17 +108,17 @@ public:
     }
 
 private:
-    // ── Grid ─────────────────────────────────────────────────────────────────
+    
     nav_msgs::msg::OccupancyGrid global_map_;
-    std::vector<float> cell_prob_sum_;   // weighted probability accumulator
-    std::vector<float> cell_conf_sum_;   // weight (confidence) accumulator
+    std::vector<float> cell_prob_sum_;   
+    std::vector<float> cell_conf_sum_;   
     std::mutex         grid_mutex_;
 
-    // ── Robot cache ───────────────────────────────────────────────────────────
+    
     std::unordered_map<std::string, RobotInfo> robots_;
     std::mutex robots_mutex_;
 
-    // ── Publishers/subs ───────────────────────────────────────────────────────
+    
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr   pub_map_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr          pub_stats_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr          pub_events_;
@@ -138,7 +129,7 @@ private:
 
     rclcpp::TimerBase::SharedPtr timer_;
 
-    // ── Callbacks ─────────────────────────────────────────────────────────────
+    
     void onPartialMap(const swarmap_msgs::msg::PartialMap::SharedPtr &msg)
     {
         const int W = static_cast<int>(global_map_.info.width);
@@ -180,7 +171,7 @@ private:
         r.y           = msg->pose.position.y;
     }
 
-    // ── Publish cycle ─────────────────────────────────────────────────────────
+    
     void publishAll()
     {
         rebuildGlobalMap();
@@ -216,7 +207,7 @@ private:
         oss << "{";
         oss << jsonKV("coverage_pct", std::to_string(total_coverage * 100.0f)) << ",";
 
-        // Per-robot array
+        
         oss << jsonStr("robots") << ":[";
         bool first = true;
         for (auto &[id, r] : robots_) {
@@ -252,9 +243,8 @@ private:
     }
 };
 
-} // namespace swarmap
+} 
 
-// ─────────────────────────────────────────────────────────────────────────────
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
