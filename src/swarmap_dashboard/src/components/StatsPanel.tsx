@@ -79,7 +79,6 @@ const s: Record<string, React.CSSProperties> = {
   }),
 }
 
-// Rolling history for coverage chart
 const history: { t: number; cov: number }[] = []
 
 export default function StatsPanel({ ros }: Props) {
@@ -90,7 +89,7 @@ export default function StatsPanel({ ros }: Props) {
     try { return JSON.parse(raw.data) as Stats } catch { return null }
   }, [raw])
 
-  // Append to rolling history
+  
   if (stats) {
     history.push({ t: Date.now() / 1000, cov: stats.coverage_pct })
     if (history.length > 120) history.shift()
@@ -104,7 +103,7 @@ export default function StatsPanel({ ros }: Props) {
   return (
     <div style={s.root}>
 
-      {/* Coverage ring */}
+      {}
       <div style={s.section}>
         <div style={s.label}>COVERAGE</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -120,7 +119,7 @@ export default function StatsPanel({ ros }: Props) {
         </div>
       </div>
 
-      {/* Coverage-over-time chart */}
+      {}
       <div style={{ ...s.section, height: 120 }}>
         <div style={s.label}>COVERAGE OVER TIME</div>
         <ResponsiveContainer width="100%" height={88}>
@@ -133,7 +132,7 @@ export default function StatsPanel({ ros }: Props) {
         </ResponsiveContainer>
       </div>
 
-      {/* Per-robot table */}
+      {}
       <div style={s.section}>
         <div style={s.label}>ROBOTS</div>
         {robots.map((r) => (
