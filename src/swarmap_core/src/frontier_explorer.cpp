@@ -7,15 +7,18 @@ namespace swarmap {
 
 FrontierExplorer::FrontierExplorer(float frontier_min_size,
                                    float anti_revisit_sigma,
-                                   float anti_revisit_weight)
+                                   float anti_revisit_weight,
+                                   float battery_weight)
     : min_cluster_size_(frontier_min_size),
       anti_revisit_sigma_(anti_revisit_sigma),
-      anti_revisit_weight_(anti_revisit_weight)
+      anti_revisit_weight_(anti_revisit_weight),
+      battery_weight_(battery_weight)
 {}
 
 std::vector<FrontierCluster> FrontierExplorer::detect(
     const OccupancyGrid &grid,
-    float robot_wx, float robot_wy)
+    float robot_wx, float robot_wy,
+    float battery)
 {
     
     std::vector<std::pair<int,int>> frontier_cells;
@@ -46,12 +49,17 @@ std::vector<FrontierCluster> FrontierExplorer::detect(
     int robot_gx, robot_gy;
     grid.worldToGrid(robot_wx, robot_wy, robot_gx, robot_gy);
 
+    // energy_factor > 1 when battery is low, making all frontiers look farther away.
+    // A robot at 20% battery sees frontiers as 1 + 2.0*(1-0.2) = 2.6x more expensive.
+    float energy_factor = 1.0f + battery_weight_ * (1.0f - std::clamp(battery, 0.0f, 1.0f));
+
     for (auto &cl : clusters) {
         float dwx = cl.centroid_wx - robot_wx;
         float dwy = cl.centroid_wy - robot_wy;
         float dist = std::hypot(dwx, dwy);
         float size_term = 1.0f / static_cast<float>(cl.cells.size() + 1);
-        cl.score = dist + 2.0f * size_term + antiRevisitPenalty(cl.centroid_wx, cl.centroid_wy);
+        cl.score = energy_factor * dist + 2.0f * size_term
+                   + antiRevisitPenalty(cl.centroid_wx, cl.centroid_wy);
     }
 
     std::sort(clusters.begin(), clusters.end(),
