@@ -39,9 +39,6 @@ using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface
 
 namespace swarmap {
 
-// ─────────────────────────────────────────────────────────────────────────────
-// State machine
-// ─────────────────────────────────────────────────────────────────────────────
 enum class RobotState { IDLE, EXPLORING, NAVIGATING, RETURNING, FAILED };
 
 static std::string stateStr(RobotState s) {
@@ -55,15 +52,12 @@ static std::string stateStr(RobotState s) {
     return "UNKNOWN";
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// RobotNode
-// ─────────────────────────────────────────────────────────────────────────────
 class RobotNode : public rclcpp_lifecycle::LifecycleNode {
 public:
     explicit RobotNode(const rclcpp::NodeOptions &opts = rclcpp::NodeOptions())
         : rclcpp_lifecycle::LifecycleNode("robot_node", opts)
     {
-        // Parameters declared here; values loaded in on_configure()
+        
         declare_parameter("robot_id",          "robot_0");
         declare_parameter("sensor_range",      5.0);
         declare_parameter("comm_radius",       8.0);
@@ -71,13 +65,13 @@ public:
         declare_parameter("map_width_m",       50.0);
         declare_parameter("map_height_m",      50.0);
         declare_parameter("noise_level",       0.0);
-        declare_parameter("battery_drain_rate", 0.001);   // per second
+        declare_parameter("battery_drain_rate", 0.001);   
         declare_parameter("goal_tolerance",    0.3);
         declare_parameter("frontier_min_size", 5.0f);
         declare_parameter("update_rate_hz",    5.0);
     }
 
-    // ── Lifecycle callbacks ──────────────────────────────────────────────────
+    
     CallbackReturn on_configure(const rclcpp_lifecycle::State &) override
     {
         robot_id_    = get_parameter("robot_id").as_string();
@@ -108,7 +102,7 @@ public:
         auto qos_best     = rclcpp::QoS(10).best_effort();
         std::string ns = "/" + robot_id_;
 
-        // Publishers
+        
         pub_map_    = create_publisher<swarmap_msgs::msg::PartialMap>(
                           ns + "/map",    qos_reliable);
         pub_status_ = create_publisher<swarmap_msgs::msg::RobotStatus>(
@@ -122,7 +116,7 @@ public:
         pub_acc_    = create_publisher<std_msgs::msg::Float32>(
                           ns + "/map_accuracy", qos_reliable);
 
-        // Subscribers
+        
         sub_scan_ = create_subscription<sensor_msgs::msg::LaserScan>(
             ns + "/scan", qos_best,
             [this](sensor_msgs::msg::LaserScan::SharedPtr msg){ onScan(msg); });
@@ -184,7 +178,7 @@ public:
     }
 
 private:
-    // ── State ────────────────────────────────────────────────────────────────
+    
     std::string robot_id_;
     RobotState  state_ = RobotState::IDLE;
 
@@ -197,11 +191,11 @@ private:
     float  goal_x_ = 0.0f, goal_y_ = 0.0f;
     bool   has_goal_ = false;
 
-    // Stuck detection
+    
     double pose_x_last_ = 0.0, pose_y_last_ = 0.0;
     double last_moved_time_ = 0.0;
-    static constexpr double STUCK_TIMEOUT_S  = 5.0;   // seconds without movement
-    static constexpr double STUCK_DIST_THRESH = 0.05;  // metres — less = stuck
+    static constexpr double STUCK_TIMEOUT_S  = 5.0;   
+    static constexpr double STUCK_DIST_THRESH = 0.05;  
 
     std::unique_ptr<OccupancyGrid>    grid_;
     std::unique_ptr<FrontierExplorer> explorer_;
@@ -212,7 +206,7 @@ private:
     std::unique_ptr<tf2_ros::Buffer>                         tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener>              tf_listener_;
 
-    // Publishers / subscribers
+    
     rclcpp::Publisher<swarmap_msgs::msg::PartialMap>::SharedPtr      pub_map_;
     rclcpp::Publisher<swarmap_msgs::msg::RobotStatus>::SharedPtr     pub_status_;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr          pub_cmd_;
@@ -224,7 +218,7 @@ private:
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr        sub_odom_;
     rclcpp::Subscription<swarmap_msgs::msg::NeighbourDiscovery>::SharedPtr sub_disc_;
 
-    // Per-neighbour subscriptions — created dynamically on first discovery
+    
     std::unordered_map<std::string,
         rclcpp::Subscription<swarmap_msgs::msg::PartialMap>::SharedPtr>  neighbour_map_subs_;
     std::unordered_map<std::string,
@@ -235,7 +229,7 @@ private:
 
     std::default_random_engine rng_{std::random_device{}()};
 
-    // ── Sensor callbacks ─────────────────────────────────────────────────────
+    
     void onScan(const sensor_msgs::msg::LaserScan::SharedPtr &msg)
     {
         if (state_ == RobotState::FAILED) return;
@@ -258,7 +252,7 @@ private:
         }
     }
 
-    // Bresenham ray-cast: mark free cells along the ray, occupied at endpoint
+    
     void rayCast(float sx, float sy, float ex, float ey, bool mark_endpoint)
     {
         int gx0, gy0, gx1, gy1;
@@ -290,13 +284,13 @@ private:
         pose_x_ = msg->pose.pose.position.x;
         pose_y_ = msg->pose.pose.position.y;
 
-        // Extract yaw from quaternion
+        
         auto &q = msg->pose.pose.orientation;
         pose_theta_ = std::atan2(2.0*(q.w*q.z + q.x*q.y),
                                  1.0 - 2.0*(q.y*q.y + q.z*q.z));
         broadcastTF(msg->header.stamp);
 
-        // Update stuck detection
+        
         double now = get_clock()->now().seconds();
         double dist = std::hypot(pose_x_ - pose_x_last_, pose_y_ - pose_y_last_);
         if (dist > STUCK_DIST_THRESH) {
@@ -314,7 +308,7 @@ private:
                                    msg->position.x, msg->position.y,
                                    msg->comm_radius, now);
 
-        // Subscribe to this neighbour's map and bids on first contact
+        
         if (neighbour_map_subs_.count(msg->robot_id) == 0) {
             const std::string ns = "/" + msg->robot_id;
             auto qos = rclcpp::QoS(5).reliable();
@@ -347,7 +341,7 @@ private:
         explorer_->recordBid(*msg);
     }
 
-    // ── TF broadcast ─────────────────────────────────────────────────────────
+    
     void broadcastTF(const rclcpp::Time &stamp)
     {
         geometry_msgs::msg::TransformStamped t;
@@ -364,7 +358,7 @@ private:
         tf_broadcaster_->sendTransform(t);
     }
 
-    // ── Publishers ───────────────────────────────────────────────────────────
+    
     void publishMap()
     {
         if (state_ == RobotState::FAILED) return;
@@ -429,7 +423,7 @@ private:
         pub_disc_->publish(msg);
     }
 
-    // ── Exploration tick ─────────────────────────────────────────────────────
+    
     void explorationTick()
     {
         if (state_ == RobotState::FAILED) return;
@@ -446,7 +440,7 @@ private:
             return;
         }
 
-        // IDLE or EXPLORING → pick next frontier
+        
         std::shared_lock lock(grid_->mutex);
         auto clusters = explorer_->detect(*grid_,
                                            static_cast<float>(pose_x_),
@@ -463,7 +457,7 @@ private:
         double now = get_clock()->now().seconds();
         explorer_->expireBids(now);
 
-        // Try clusters in score order until we win the auction
+        
         for (auto &cl : clusters) {
             if (explorer_->winsAuction(robot_id_, cl.score,
                                         cl.centroid_wx, cl.centroid_wy)) {
@@ -486,24 +480,24 @@ private:
                 return;
             }
         }
-        // Lost all auctions — wait for next tick
+        
         state_ = RobotState::EXPLORING;
     }
 
-    // ── Navigation ───────────────────────────────────────────────────────────
+    
     void driveTowardGoal()
     {
         if (!has_goal_) { state_ = RobotState::EXPLORING; return; }
 
-        // Stuck check — abandon goal if we haven't moved in a while
+        
         double now = get_clock()->now().seconds();
         if (last_moved_time_ > 0.0 && (now - last_moved_time_) > STUCK_TIMEOUT_S) {
             RCLCPP_WARN(get_logger(), "[%s] Stuck — abandoning goal (%.2f, %.2f)",
                         robot_id_.c_str(), goal_x_, goal_y_);
             stop();
-            explorer_->markVisited(goal_x_, goal_y_);  // blacklist this frontier
+            explorer_->markVisited(goal_x_, goal_y_);  
             has_goal_ = false;
-            last_moved_time_ = now;  // reset so we don't spam
+            last_moved_time_ = now;  
             state_ = RobotState::EXPLORING;
             return;
         }
@@ -519,7 +513,7 @@ private:
             has_goal_ = false;
             state_ = RobotState::EXPLORING;
 
-            // Release bid
+            
             swarmap_msgs::msg::FrontierBid release;
             release.header.stamp = get_clock()->now();
             release.robot_id     = robot_id_;
@@ -530,7 +524,7 @@ private:
 
         float bearing = std::atan2(dy, dx);
         float angle_err = bearing - static_cast<float>(pose_theta_);
-        // Normalise to [-π, π]
+        
         while (angle_err >  M_PI) angle_err -= 2.0f * M_PI;
         while (angle_err < -M_PI) angle_err += 2.0f * M_PI;
 
@@ -547,7 +541,7 @@ private:
         pub_cmd_->publish(zero);
     }
 
-    // ── Battery ──────────────────────────────────────────────────────────────
+    
     void drainBattery()
     {
         float drain = get_parameter("battery_drain_rate").as_double();
@@ -561,16 +555,15 @@ private:
     }
 };
 
-} // namespace swarmap
+} 
 
-// ─────────────────────────────────────────────────────────────────────────────
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
     auto node = std::make_shared<swarmap::RobotNode>();
 
-    // Auto-configure and activate — no external lifecycle manager required.
-    // Callers can still trigger transitions manually via ros2 lifecycle set.
+    
+    
     using Transition = lifecycle_msgs::msg::Transition;
     node->trigger_transition(Transition::TRANSITION_CONFIGURE);
     node->trigger_transition(Transition::TRANSITION_ACTIVATE);
