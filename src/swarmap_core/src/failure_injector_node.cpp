@@ -16,9 +16,6 @@ using namespace std::chrono_literals;
 
 namespace swarmap {
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FailureInjectorNode
-// ─────────────────────────────────────────────────────────────────────────────
 class FailureInjectorNode : public rclcpp::Node {
 public:
     FailureInjectorNode()
@@ -26,8 +23,8 @@ public:
           rng_(std::random_device{}())
     {
         declare_parameter("num_robots",    10);
-        declare_parameter("failure_rate",  0.0);   // failures per minute
-        declare_parameter("failure_mode",  std::string("random"));  // random|progressive|cascade
+        declare_parameter("failure_rate",  0.0);   
+        declare_parameter("failure_mode",  std::string("random"));  
         declare_parameter("log_file",      std::string("results/failure_log.csv"));
 
         num_robots_   = get_parameter("num_robots").as_int();
@@ -37,14 +34,14 @@ public:
 
         pub_events_ = create_publisher<std_msgs::msg::String>("/swarm/events", 10);
 
-        // Open log file
+        
         if (!log_file_.empty()) {
             log_stream_.open(log_file_, std::ios::app);
             if (log_stream_.is_open())
                 log_stream_ << "time_s,robot_id,failure_mode\n";
         }
 
-        // Check every 10 s
+        
         timer_ = create_wall_timer(10s, [this](){ tick(); });
 
         RCLCPP_INFO(get_logger(),
@@ -68,21 +65,21 @@ private:
 
     void tick()
     {
-        // Re-read parameters in case they were set via /swarm/set_param
+        
         failure_rate_ = get_parameter("failure_rate").as_double();
         failure_mode_ = get_parameter("failure_mode").as_string();
 
         if (failure_rate_ <= 0.0) return;
 
-        // Probability of at least one failure in the 10 s window
-        // P = 1 - exp(-rate * dt_min)
+        
+        
         double dt_min = 10.0 / 60.0;
         double p_fail = 1.0 - std::exp(-failure_rate_ * dt_min);
 
         std::uniform_real_distribution<double> coin(0.0, 1.0);
         if (coin(rng_) > p_fail) return;
 
-        // Pick target robot
+        
         int target = pickTarget();
         if (target < 0) return;
 
@@ -91,7 +88,7 @@ private:
 
     int pickTarget()
     {
-        // Collect active robots
+        
         std::vector<int> active;
         for (int i = 0; i < num_robots_; ++i)
             if (failed_ids_.count(i) == 0) active.push_back(i);
@@ -99,14 +96,14 @@ private:
         if (active.empty()) return -1;
 
         if (failure_mode_ == "progressive") {
-            // Fail in order
+            
             int t = active.front();
             return t;
         } else if (failure_mode_ == "cascade") {
-            // Fail the lowest-ID active robot
+            
             return active.front();
         } else {
-            // random
+            
             std::uniform_int_distribution<int> pick(0, static_cast<int>(active.size()) - 1);
             return active[pick(rng_)];
         }
@@ -117,7 +114,7 @@ private:
         failed_ids_.insert(robot_idx);
         std::string rid = "robot_" + std::to_string(robot_idx);
 
-        // Call lifecycle SHUTDOWN on the robot node
+        
         std::string service_name = "/" + rid + "/robot_node/change_state";
         auto client = create_client<lifecycle_msgs::srv::ChangeState>(service_name);
 
@@ -129,7 +126,7 @@ private:
             RCLCPP_WARN(get_logger(), "Lifecycle service not ready for %s — skipping", rid.c_str());
         }
 
-        // Publish event
+        
         double now_s = get_clock()->now().seconds();
         std::ostringstream oss;
         oss << "{\"time_s\":" << now_s
@@ -140,7 +137,7 @@ private:
         ev.data = oss.str();
         pub_events_->publish(ev);
 
-        // Log to CSV
+        
         if (log_stream_.is_open())
             log_stream_ << now_s << "," << rid << "," << failure_mode_ << "\n";
 
@@ -149,9 +146,8 @@ private:
     }
 };
 
-} // namespace swarmap
+} 
 
-// ─────────────────────────────────────────────────────────────────────────────
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
