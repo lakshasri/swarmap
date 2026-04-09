@@ -1,4 +1,4 @@
-# Swarmap — Decentralised Robot Exploration and Mapping
+# Swarmap - Decentralised Robot Exploration and Mapping
 
 A decentralised swarm robotics system where autonomous robots collaborate to explore and map unknown environments without any central coordinator.
 
