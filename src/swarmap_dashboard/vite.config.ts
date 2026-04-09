@@ -7,7 +7,7 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // Proxy WebSocket connections to rosbridge during development
+      
       '/rosbridge': {
         target: 'ws://localhost:9090',
         ws: true,
