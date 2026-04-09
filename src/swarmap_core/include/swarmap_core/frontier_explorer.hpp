@@ -26,11 +26,12 @@ struct BidRecord {
 class FrontierExplorer {
 public:
     explicit FrontierExplorer(float frontier_min_size, float anti_revisit_sigma,
-                              float anti_revisit_weight);
+                              float anti_revisit_weight, float battery_weight = 2.0f);
 
-    
+
     std::vector<FrontierCluster> detect(const OccupancyGrid &grid,
-                                        float robot_wx, float robot_wy);
+                                        float robot_wx, float robot_wy,
+                                        float battery = 1.0f);
 
     
     void recordBid(const swarmap_msgs::msg::FrontierBid &bid);
@@ -50,6 +51,7 @@ private:
     float min_cluster_size_;
     float anti_revisit_sigma_;
     float anti_revisit_weight_;
+    float battery_weight_;
 
     std::vector<std::pair<float,float>> visited_centroids_;
     std::unordered_map<std::string, BidRecord> neighbour_bids_;  
