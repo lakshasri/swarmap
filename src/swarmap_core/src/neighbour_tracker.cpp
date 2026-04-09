@@ -21,7 +21,7 @@ std::vector<std::string> NeighbourTracker::getNeighbours(
 {
     std::vector<std::string> result;
     for (auto &[id, info] : peers_) {
-        // Expire stale peers
+        
         if (now_s - info.last_seen_s > expiry_s) continue;
 
         float dist = std::hypot(self_x - info.x, self_y - info.y);
@@ -37,4 +37,4 @@ bool NeighbourTracker::isNeighbour(const std::string &id) const
     return peers_.count(id) > 0;
 }
 
-} // namespace swarmap
+}
