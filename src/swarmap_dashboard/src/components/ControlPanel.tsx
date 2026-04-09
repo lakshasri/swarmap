@@ -1,6 +1,6 @@
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 import ROSLIB from 'roslib'
-import { callRosService } from '../hooks/useRosBridge'
+import { callRosService, useRosTopic } from '../hooks/useRosBridge'
 
 interface Props {
   ros: ROSLIB.Ros | null
@@ -16,8 +16,16 @@ interface SliderDef {
   unit: string
 }
 
+interface RobotRow {
+  id: string
+  state: string
+}
+
+interface Stats {
+  robots: RobotRow[]
+}
+
 const SLIDERS: SliderDef[] = [
-  { label: 'Swarm size',   param: 'num_robots',    min: 1,   max: 20,  step: 1,    defaultVal: 10,  unit: '' },
   { label: 'Sensor range', param: 'sensor_range',  min: 2,   max: 15,  step: 0.5,  defaultVal: 5,   unit: 'm' },
   { label: 'Noise level',  param: 'noise_level',   min: 0,   max: 1,   step: 0.05, defaultVal: 0,   unit: '' },
   { label: 'Failure rate', param: 'failure_rate',  min: 0,   max: 0.45,step: 0.01, defaultVal: 0,   unit: '/min' },
@@ -41,38 +49,71 @@ const s: Record<string, React.CSSProperties> = {
   sliderRow: { display: 'flex', flexDirection: 'column', gap: 3 },
   sliderLabel: { display: 'flex', justifyContent: 'space-between', fontSize: 12 },
   slider: { width: '100%', accentColor: 'var(--accent)' },
-  btn: (variant: 'primary' | 'danger' | 'default'): React.CSSProperties => ({
-    width: '100%',
-    padding: '7px 0',
+  btn: (variant: 'primary' | 'danger' | 'success' | 'default'): React.CSSProperties => ({
+    flex: 1,
+    padding: '8px 0',
     borderRadius: 6,
     border: 'none',
     cursor: 'pointer',
-    fontSize: 12,
-    fontWeight: 600,
+    fontSize: 13,
+    fontWeight: 700,
     background:
       variant === 'primary' ? 'var(--accent)' :
       variant === 'danger'  ? 'var(--danger)' :
+      variant === 'success' ? 'var(--success)' :
                               'var(--bg-secondary)',
     color: '#fff',
   }),
   select: {
-    width: '100%',
-    padding: '5px 8px',
+    flex: 1,
+    padding: '7px 8px',
     background: 'var(--bg-secondary)',
     color: 'var(--text-primary)',
     border: '1px solid var(--border)',
     borderRadius: 6,
     fontSize: 12,
   },
+  row: { display: 'flex', gap: 8, alignItems: 'center' },
   spinner: { fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' as const },
+  count: {
+    fontSize: 28,
+    fontWeight: 700,
+    color: 'var(--accent)',
+    textAlign: 'center' as const,
+    fontFamily: 'var(--font-mono)',
+  },
+  countLabel: { fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' as const },
+  feedback: (ok: boolean): React.CSSProperties => ({
+    fontSize: 11,
+    color: ok ? 'var(--success)' : 'var(--danger)',
+    textAlign: 'center' as const,
+  }),
+}
+
+function publishString(ros: ROSLIB.Ros, topicName: string, data: string) {
+  const topic = new ROSLIB.Topic({ ros, name: topicName, messageType: 'std_msgs/String' })
+  topic.publish(new ROSLIB.Message({ data }))
 }
 
 export default function ControlPanel({ ros }: Props) {
-  const [values, setValues]         = useState<Record<string, number>>(
+  const [values, setValues] = useState<Record<string, number>>(
     Object.fromEntries(SLIDERS.map(sl => [sl.param, sl.defaultVal]))
   )
   const [failureMode, setFailureMode] = useState('random')
   const [applying, setApplying]       = useState<string | null>(null)
+  const [killTarget, setKillTarget]   = useState('')
+  const [feedback, setFeedback]       = useState<{ msg: string; ok: boolean } | null>(null)
+
+  const raw = useRosTopic<{ data: string }>(ros, '/dashboard/stats', 'std_msgs/String')
+  const robots: RobotRow[] = useMemo(() => {
+    if (!raw?.data) return []
+    try { return (JSON.parse(raw.data) as Stats).robots ?? [] } catch { return [] }
+  }, [raw])
+
+  const flash = (msg: string, ok = true) => {
+    setFeedback({ msg, ok })
+    setTimeout(() => setFeedback(null), 2500)
+  }
 
   const sendParam = async (param: string, value: number | string) => {
     if (!ros) return
@@ -82,8 +123,8 @@ export default function ControlPanel({ ros }: Props) {
         parameters: [{
           name: param,
           value: typeof value === 'number'
-            ? { type: 3 , double_value: value }
-            : { type: 4 , string_value: value },
+            ? { type: 3, double_value: value }
+            : { type: 4, string_value: value },
         }],
       })
     } catch (e) {
@@ -93,23 +134,63 @@ export default function ControlPanel({ ros }: Props) {
     }
   }
 
+  const spawnRobot = () => {
+    if (!ros) return
+    publishString(ros, '/swarm/spawn_robot', '{}')
+    flash('Spawning robot…')
+  }
+
+  const killRobot = () => {
+    if (!ros || !killTarget) return
+    publishString(ros, '/swarm/kill_robot', killTarget)
+    flash(`Killed ${killTarget}`, true)
+    setKillTarget('')
+  }
+
   const sendMissionCmd = async (cmd: string) => {
     if (!ros) return
-    
-    if (cmd === 'start') {
-      await sendParam('exploration_enabled', 1)
-    } else if (cmd === 'pause') {
-      await sendParam('exploration_enabled', 0)
-    } else if (cmd === 'reset') {
-      
-      console.log('reset requested')
-    }
+    if (cmd === 'start') await sendParam('exploration_enabled', 1)
+    else if (cmd === 'pause') await sendParam('exploration_enabled', 0)
   }
 
   return (
     <div style={s.root}>
-      <div style={s.heading}>PARAMETERS</div>
 
+      <div style={s.heading}>ROBOT MANAGEMENT</div>
+      <div style={s.section}>
+        <div style={s.count}>{robots.length}</div>
+        <div style={s.countLabel}>robots active</div>
+
+        <button style={{ ...s.btn('success'), flex: 'unset', width: '100%', fontSize: 14 }} onClick={spawnRobot}>
+          + Spawn Robot
+        </button>
+
+        <div style={s.row}>
+          <select
+            style={s.select}
+            value={killTarget}
+            onChange={e => setKillTarget(e.target.value)}
+          >
+            <option value=''>Select robot to kill…</option>
+            {robots.map(r => (
+              <option key={r.id} value={r.id}>
+                {r.id}  [{r.state}]
+              </option>
+            ))}
+          </select>
+          <button
+            style={{ ...s.btn('danger'), flex: 'unset', padding: '8px 14px' }}
+            onClick={killRobot}
+            disabled={!killTarget}
+          >
+            Kill
+          </button>
+        </div>
+
+        {feedback && <div style={s.feedback(feedback.ok)}>{feedback.msg}</div>}
+      </div>
+
+      <div style={s.heading}>PARAMETERS</div>
       <div style={s.section}>
         {SLIDERS.map(sl => (
           <div key={sl.param} style={s.sliderRow}>
@@ -138,7 +219,7 @@ export default function ControlPanel({ ros }: Props) {
       <div style={s.heading}>FAILURE MODE</div>
       <div style={s.section}>
         <select
-          style={s.select}
+          style={{ ...s.select, flex: 'unset' }}
           value={failureMode}
           onChange={e => {
             setFailureMode(e.target.value)
@@ -153,19 +234,16 @@ export default function ControlPanel({ ros }: Props) {
 
       <div style={s.heading}>MISSION CONTROL</div>
       <div style={s.section}>
-        <button style={s.btn('primary')} onClick={() => sendMissionCmd('start')}>
-          Start
-        </button>
-        <button style={s.btn('default')} onClick={() => sendMissionCmd('pause')}>
-          Pause
-        </button>
-        <button style={s.btn('default')} onClick={() => sendMissionCmd('reset')}>
-          Reset
-        </button>
-        <button style={s.btn('danger')} onClick={() => sendParam('failure_rate', values['failure_rate'])}>
+        <div style={s.row}>
+          <button style={s.btn('primary')} onClick={() => sendMissionCmd('start')}>Start</button>
+          <button style={s.btn('default')} onClick={() => sendMissionCmd('pause')}>Pause</button>
+        </div>
+        <button style={{ ...s.btn('danger'), flex: 'unset', width: '100%' }}
+          onClick={() => sendParam('failure_rate', values['failure_rate'])}>
           Inject Failures
         </button>
       </div>
+
     </div>
   )
 }
