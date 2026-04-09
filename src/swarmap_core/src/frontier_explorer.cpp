@@ -13,14 +13,11 @@ FrontierExplorer::FrontierExplorer(float frontier_min_size,
       anti_revisit_weight_(anti_revisit_weight)
 {}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Public: detect frontier clusters and score them
-// ─────────────────────────────────────────────────────────────────────────────
 std::vector<FrontierCluster> FrontierExplorer::detect(
     const OccupancyGrid &grid,
     float robot_wx, float robot_wy)
 {
-    // Step 1 — collect all frontier cells (free adj to unknown)
+    
     std::vector<std::pair<int,int>> frontier_cells;
     frontier_cells.reserve(512);
 
@@ -42,10 +39,10 @@ std::vector<FrontierCluster> FrontierExplorer::detect(
         }
     }
 
-    // Step 2 — cluster by connected components (4-connected BFS)
+    
     auto clusters = clusterFrontiers(frontier_cells, grid);
 
-    // Step 3 — score clusters
+    
     int robot_gx, robot_gy;
     grid.worldToGrid(robot_wx, robot_wy, robot_gx, robot_gy);
 
@@ -65,15 +62,12 @@ std::vector<FrontierCluster> FrontierExplorer::detect(
     return clusters;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// BFS cluster labelling
-// ─────────────────────────────────────────────────────────────────────────────
 std::vector<FrontierCluster> FrontierExplorer::clusterFrontiers(
     const std::vector<std::pair<int,int>> &cells,
     const OccupancyGrid &grid) const
 {
     const int W = grid.width(), H = grid.height();
-    // Mark set for quick lookup
+    
     std::vector<std::vector<bool>> is_frontier(W, std::vector<bool>(H, false));
     for (auto &[gx, gy] : cells) is_frontier[gx][gy] = true;
 
@@ -107,7 +101,7 @@ std::vector<FrontierCluster> FrontierExplorer::clusterFrontiers(
 
         if (static_cast<float>(cl.cells.size()) < min_cluster_size_) continue;
 
-        // Compute centroid in world coords
+        
         float sum_wx = 0.0f, sum_wy = 0.0f;
         for (auto &[gx, gy] : cl.cells) {
             float wx, wy;
@@ -123,9 +117,6 @@ std::vector<FrontierCluster> FrontierExplorer::clusterFrontiers(
     return result;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Auction support
-// ─────────────────────────────────────────────────────────────────────────────
 void FrontierExplorer::recordBid(const swarmap_msgs::msg::FrontierBid &bid)
 {
     if (!bid.claim) {
@@ -157,12 +148,12 @@ bool FrontierExplorer::winsAuction(const std::string &own_id, float own_score,
 {
     for (auto &[id, rec] : neighbour_bids_) {
         if (id == own_id) continue;
-        // Is this bid targeting the same frontier?
+        
         float d = std::hypot(rec.cx - cx, rec.cy - cy);
         if (d > tolerance) continue;
-        // Competitor bids on this frontier
+        
         if (rec.bid_score < own_score) return false;
-        if (rec.bid_score == own_score && id < own_id) return false;  // tie-break by ID
+        if (rec.bid_score == own_score && id < own_id) return false;  
     }
     return true;
 }
@@ -172,9 +163,6 @@ void FrontierExplorer::markVisited(float wx, float wy)
     visited_centroids_.emplace_back(wx, wy);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Anti-revisit penalty
-// ─────────────────────────────────────────────────────────────────────────────
 float FrontierExplorer::antiRevisitPenalty(float wx, float wy) const
 {
     float penalty = 0.0f;
@@ -185,4 +173,4 @@ float FrontierExplorer::antiRevisitPenalty(float wx, float wy) const
     return penalty;
 }
 
-} // namespace swarmap
+}
