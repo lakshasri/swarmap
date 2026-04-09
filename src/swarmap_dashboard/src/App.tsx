@@ -90,7 +90,7 @@ export default function App() {
 
   return (
     <div style={styles.root}>
-      {/* Header */}
+      {}
       <header style={styles.header}>
         <span style={styles.title}>SWARMAP</span>
         <div style={styles.tabs}>
@@ -103,14 +103,14 @@ export default function App() {
         </div>
       </header>
 
-      {/* Body */}
+      {}
       <div style={styles.body}>
-        {/* Left — control panel */}
+        {}
         <aside style={styles.left}>
           <ControlPanel ros={ros} />
         </aside>
 
-        {/* Center — map + network graph */}
+        {}
         <main style={styles.center}>
           {view === 'live' ? (
             <>
@@ -122,7 +122,7 @@ export default function App() {
           )}
         </main>
 
-        {/* Right — stats */}
+        {}
         <aside style={styles.right}>
           <StatsPanel ros={ros} />
         </aside>
