@@ -5,7 +5,6 @@
 
 using namespace swarmap;
 
-// Helper — build a PartialMap with uniform value and confidence
 static swarmap_msgs::msg::PartialMap makePartial(
     int w, int h, int8_t val, float conf,
     int origin_x = 0, int origin_y = 0, float res = 0.1f)
@@ -21,42 +20,36 @@ static swarmap_msgs::msg::PartialMap makePartial(
     return m;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Unknown + known
-// ─────────────────────────────────────────────────────────────────────────────
 TEST(MapMergerTest, UnknownLocalAcceptsIncoming)
 {
     OccupancyGrid local(10, 10, 0.1f);
     MapMerger merger;
 
-    // Incoming says cell (3,3) is FREE
+    
     auto incoming = makePartial(10, 10, CELL_FREE, 0.8f);
     merger.merge(local, incoming, 0, 0);
 
-    // After merge the cell should move toward FREE (may not be fully FREE yet
-    // — one merge step applies a partial log-odds update)
-    // Just verify it is no longer unknown
+    
+    
+    
     EXPECT_NE(local.getCellRos(3, 3), CELL_UNKNOWN);
 }
 
 TEST(MapMergerTest, IncomingUnknownSkipped)
 {
     OccupancyGrid local(10, 10, 0.1f);
-    // Pre-mark local cell as free
+    
     for (int i = 0; i < 5; ++i) local.updateCell(5, 5, LOG_ODDS_FREE);
 
     MapMerger merger;
-    // Incoming marks all cells unknown (-1)
+    
     auto incoming = makePartial(10, 10, CELL_UNKNOWN, 0.0f);
     merger.merge(local, incoming, 0, 0);
 
-    // Local cell should remain unchanged (free)
+    
     EXPECT_EQ(local.getCellRos(5, 5), CELL_FREE);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Both known — weighted average
-// ─────────────────────────────────────────────────────────────────────────────
 TEST(MapMergerTest, TwoFreeGridsStayFree)
 {
     OccupancyGrid local(10, 10, 0.1f);
@@ -91,32 +84,26 @@ TEST(MapMergerTest, TwoOccupiedGridsStayOccupied)
             EXPECT_EQ(local.getCellRos(x, y), CELL_OCCUPIED);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Offset application
-// ─────────────────────────────────────────────────────────────────────────────
 TEST(MapMergerTest, OffsetAppliedCorrectly)
 {
     OccupancyGrid local(20, 20, 0.1f);
     MapMerger merger;
 
-    // Incoming 5×5 patch, origin at cell (2,2) in sender coords
-    // Offset (5,5) shifts it in local coords
-    // local_gx = offset_x + origin_x + col = 5+2+col → cols land at 7..11
-    // local_gy = offset_y + origin_y + row = 5+2+row → rows land at 7..11
+    
+    
+    
+    
     auto incoming = makePartial(5, 5, CELL_FREE, 0.8f, 2, 2);
     merger.merge(local, incoming, 5, 5);
 
-    // First cell of the patch lands at (7,7)
+    
     EXPECT_NE(local.getCellRos(7, 7), CELL_UNKNOWN);
-    // Last cell of the patch lands at (11,11)
+    
     EXPECT_NE(local.getCellRos(11, 11), CELL_UNKNOWN);
-    // Cell at (0,0) should be untouched
+    
     EXPECT_EQ(local.getCellRos(0, 0), CELL_UNKNOWN);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Accuracy metric
-// ─────────────────────────────────────────────────────────────────────────────
 TEST(MapMergerTest, AccuracyPerfectMatch)
 {
     OccupancyGrid local(10, 10, 0.1f), gt(10, 10, 0.1f);
