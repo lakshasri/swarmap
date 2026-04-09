@@ -65,10 +65,12 @@ public:
         declare_parameter("map_width_m",       50.0);
         declare_parameter("map_height_m",      50.0);
         declare_parameter("noise_level",       0.0);
-        declare_parameter("battery_drain_rate", 0.001);   
-        declare_parameter("goal_tolerance",    0.3);
-        declare_parameter("frontier_min_size", 5.0f);
-        declare_parameter("update_rate_hz",    5.0);
+        declare_parameter("battery_drain_rate",   0.001);
+        declare_parameter("battery_weight",       2.0);
+        declare_parameter("dock_return_safety",   0.85);
+        declare_parameter("goal_tolerance",       0.3);
+        declare_parameter("frontier_min_size",    5.0f);
+        declare_parameter("update_rate_hz",       5.0);
     }
 
     
@@ -92,7 +94,8 @@ public:
 
         explorer_ = std::make_unique<FrontierExplorer>(
             get_parameter("frontier_min_size").as_double(),
-            2.0f, 5.0f);
+            2.0f, 5.0f,
+            static_cast<float>(get_parameter("battery_weight").as_double()));
         merger_   = std::make_unique<MapMerger>();
         tracker_  = std::make_unique<NeighbourTracker>();
         tf_buffer_= std::make_unique<tf2_ros::Buffer>(get_clock());
@@ -444,7 +447,8 @@ private:
         std::shared_lock lock(grid_->mutex);
         auto clusters = explorer_->detect(*grid_,
                                            static_cast<float>(pose_x_),
-                                           static_cast<float>(pose_y_));
+                                           static_cast<float>(pose_y_),
+                                           battery_);
         lock.unlock();
 
         if (clusters.empty()) {
@@ -467,12 +471,13 @@ private:
                 state_ = RobotState::NAVIGATING;
 
                 swarmap_msgs::msg::FrontierBid bid;
-                bid.header.stamp       = get_clock()->now();
-                bid.robot_id           = robot_id_;
-                bid.frontier_centroid.x= cl.centroid_wx;
-                bid.frontier_centroid.y= cl.centroid_wy;
-                bid.bid_score          = cl.score;
-                bid.claim              = true;
+                bid.header.stamp        = get_clock()->now();
+                bid.robot_id            = robot_id_;
+                bid.frontier_centroid.x = cl.centroid_wx;
+                bid.frontier_centroid.y = cl.centroid_wy;
+                bid.bid_score           = cl.score;
+                bid.battery_level       = battery_;
+                bid.claim               = true;
                 pub_bid_->publish(bid);
 
                 RCLCPP_DEBUG(get_logger(), "[%s] Claimed frontier (%.2f, %.2f) score=%.2f",
@@ -544,13 +549,30 @@ private:
     
     void drainBattery()
     {
-        float drain = get_parameter("battery_drain_rate").as_double();
+        float drain  = static_cast<float>(get_parameter("battery_drain_rate").as_double());
         battery_ = std::max(0.0f, battery_ - drain);
-        if (battery_ < 0.15f && state_ != RobotState::RETURNING
-                              && state_ != RobotState::FAILED) {
+
+        if (state_ == RobotState::FAILED || state_ == RobotState::RETURNING) return;
+
+        // Predictive return: compare time-to-empty vs time-to-reach-dock.
+        // drain is fraction per second (timer fires every 1 s).
+        float dock_dist      = std::hypot(static_cast<float>(pose_x_),
+                                          static_cast<float>(pose_y_));
+        constexpr float AVG_SPEED = 0.25f;          // conservative m/s estimate
+        float time_to_return = dock_dist / AVG_SPEED;
+        float time_to_empty  = (drain > 0.0f) ? battery_ / drain : 1e9f;
+        float safety         = static_cast<float>(
+                                   get_parameter("dock_return_safety").as_double());
+
+        bool predict_stranded = (battery_ < 0.9f) &&
+                                (time_to_return > safety * time_to_empty);
+        bool critically_low   = (battery_ < 0.05f);
+
+        if (predict_stranded || critically_low) {
             state_ = RobotState::RETURNING;
-            RCLCPP_WARN(get_logger(), "[%s] Battery low (%.0f%%) — returning",
-                        robot_id_.c_str(), battery_ * 100.0f);
+            RCLCPP_WARN(get_logger(),
+                "[%s] Returning — battery %.0f%%, %.1fs to dock, %.1fs of charge left",
+                robot_id_.c_str(), battery_ * 100.0f, time_to_return, time_to_empty);
         }
     }
 };
