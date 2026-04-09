@@ -174,6 +174,24 @@ def launch_swarm_nodes(context, *args, **kwargs):
             ],
             output='screen',
         ),
+        Node(
+            package='swarmap_core',
+            executable='robot_spawner_node.py',
+            name='robot_spawner_node',
+            parameters=[
+                params_path,
+                {
+                    'use_sim_time': True,
+                    'num_robots': int(num_robots),
+                    'sensor_range': float(LaunchConfiguration('sensor_range').perform(context)),
+                    'comm_radius': float(LaunchConfiguration('comm_radius').perform(context)),
+                    'noise_level': float(LaunchConfiguration('noise_level').perform(context)),
+                    'failure_rate': float(failure_rate),
+                    'map_resolution': float(LaunchConfiguration('map_resolution').perform(context)),
+                },
+            ],
+            output='screen',
+        ),
     ]
 
 
