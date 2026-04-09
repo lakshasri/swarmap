@@ -25,6 +25,8 @@
 
     # ── Battery ───────────────────────────────────────────────────────────────
     battery_drain_rate: 0.001  # fraction drained per second (1.0 → empty in ~16 min)
+    battery_weight: 2.0        # scales how aggressively low-battery robots avoid far frontiers
+    dock_return_safety: 0.85   # return if time_to_dock > safety * time_to_empty
 
     # ── Fault injection ───────────────────────────────────────────────────────
     failure_rate: 0.0        # robot failure probability per minute (0–0.45)
