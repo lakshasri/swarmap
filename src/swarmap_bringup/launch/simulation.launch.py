@@ -2,13 +2,12 @@ import os
 import math
 from launch import LaunchDescription
 from launch.actions import (
-    DeclareLaunchArgument, GroupAction, IncludeLaunchDescription,
+    DeclareLaunchArgument, IncludeLaunchDescription,
     OpaqueFunction, TimerAction
 )
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
-from launch_ros.actions import Node, PushRosNamespace
-from launch_ros.substitutions import FindPackageShare
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 
 
@@ -25,30 +24,33 @@ def generate_robot_spawn_actions(context, *args, **kwargs):
     map_res      = LaunchConfiguration('map_resolution').perform(context)
 
     bringup_share = get_package_share_directory('swarmap_bringup')
+    # SDF model file for Ignition Gazebo Fortress
+    model_path    = os.path.join(bringup_share, 'models', 'diff_drive_robot', 'model.sdf')
+    # URDF kept for robot_state_publisher only (TF tree, no Gazebo plugins needed)
     urdf_path     = os.path.join(bringup_share, 'urdf', 'diff_drive_robot.urdf.xacro')
     params_path   = os.path.join(bringup_share, 'config', 'default_params.yaml')
 
     actions = []
 
     # Spread robots in a grid pattern around the origin
-    cols = max(1, math.ceil(math.sqrt(num_robots)))
-    spacing = 2.0   # metres between spawn points
+    cols    = max(1, math.ceil(math.sqrt(num_robots)))
+    spacing = 2.5   # metres between spawn points
 
     for i in range(num_robots):
         robot_id = f'robot_{i}'
         col = i % cols
         row = i // cols
-        x = (col - cols / 2.0) * spacing
-        y = (row - cols / 2.0) * spacing
+        x   = (col - cols / 2.0) * spacing
+        y   = (row - cols / 2.0) * spacing
 
-        # ── Spawn robot model into Gazebo ────────────────────────────────────
+        # ── Spawn robot SDF model into Ignition Gazebo ───────────────────────
         spawn = Node(
             package='ros_gz_sim',
             executable='create',
             name=f'spawn_{robot_id}',
             arguments=[
                 '-name',  robot_id,
-                '-file',  urdf_path,
+                '-file',  model_path,
                 '-x',     str(x),
                 '-y',     str(y),
                 '-z',     '0.1',
@@ -57,27 +59,24 @@ def generate_robot_spawn_actions(context, *args, **kwargs):
             output='screen',
         )
 
-        # ── Robot state publisher (URDF → TF) ───────────────────────────────
-        rsp = Node(
-            package='robot_state_publisher',
-            executable='robot_state_publisher',
-            namespace=robot_id,
-            name='robot_state_publisher',
-            parameters=[{'use_sim_time': True}],
-            remappings=[('/tf', 'tf'), ('/tf_static', 'tf_static')],
-        )
-
-        # ── ros_gz_bridge: Gazebo topics ↔ ROS2 topics ──────────────────────
+        # ── ros_gz_bridge: Ignition topics ↔ ROS2 topics ────────────────────
+        # Ignition Fortress uses ignition.msgs.* (not gz.msgs.*)
         bridge = Node(
             package='ros_gz_bridge',
             executable='parameter_bridge',
             namespace=robot_id,
             name='gz_bridge',
             arguments=[
-                f'/model/{robot_id}/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry',
-                f'/model/{robot_id}/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
-                f'/model/{robot_id}/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist',
-                '/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
+                f'/model/{robot_id}/odometry'
+                f'@nav_msgs/msg/Odometry[ignition.msgs.Odometry',
+
+                f'/model/{robot_id}/scan'
+                f'@sensor_msgs/msg/LaserScan[ignition.msgs.LaserScan',
+
+                f'/model/{robot_id}/cmd_vel'
+                f'@geometry_msgs/msg/Twist]ignition.msgs.Twist',
+
+                '/clock@rosgraph_msgs/msg/Clock[ignition.msgs.Clock',
             ],
             remappings=[
                 (f'/model/{robot_id}/odometry', f'/{robot_id}/odom'),
@@ -97,59 +96,58 @@ def generate_robot_spawn_actions(context, *args, **kwargs):
             parameters=[
                 params_path,
                 {
-                    'robot_id':     robot_id,
-                    'sensor_range': float(sensor_range),
-                    'comm_radius':  float(comm_radius),
-                    'noise_level':  float(noise_level),
-                    'failure_rate': float(failure_rate),
+                    'robot_id':       robot_id,
+                    'sensor_range':   float(sensor_range),
+                    'comm_radius':    float(comm_radius),
+                    'noise_level':    float(noise_level),
+                    'failure_rate':   float(failure_rate),
                     'map_resolution': float(map_res),
-                    'use_sim_time': True,
+                    'use_sim_time':   True,
                 }
             ],
             output='screen',
         )
 
-        # Delay each robot by 0.5s so Gazebo doesn't get flooded at t=0
+        # Stagger spawns so Gazebo isn't overwhelmed at t=0
+        delay = float(i) * 0.5 + 1.0
         actions.append(spawn)
-        actions.append(TimerAction(period=float(i) * 0.5 + 1.0,
-                                   actions=[rsp, bridge, robot_node]))
+        actions.append(TimerAction(period=delay, actions=[bridge, robot_node]))
 
     return actions
+
+
+def launch_gazebo(context, *args, **kwargs):
+    bringup_share = get_package_share_directory('swarmap_bringup')
+    world_name    = LaunchConfiguration('world').perform(context)
+    world_file    = os.path.join(bringup_share, 'worlds', world_name + '.sdf')
+    return [
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(get_package_share_directory('ros_gz_sim'),
+                             'launch', 'gz_sim.launch.py')
+            ),
+            launch_arguments={
+                'gz_args':          f'-r {world_file}',
+                'gz_version':       '6',
+                'on_exit_shutdown': 'true',
+            }.items(),
+        )
+    ]
 
 
 def generate_launch_description():
     return LaunchDescription([
         # ── Launch arguments ─────────────────────────────────────────────────
-        DeclareLaunchArgument('num_robots',    default_value='10',
-            description='Number of robots to spawn'),
-        DeclareLaunchArgument('sensor_range',  default_value='5.0',
-            description='LiDAR sensor range in metres'),
-        DeclareLaunchArgument('comm_radius',   default_value='8.0',
-            description='Inter-robot communication radius in metres'),
-        DeclareLaunchArgument('noise_level',   default_value='0.0',
-            description='Gaussian noise fraction applied to sensor readings (0-1)'),
-        DeclareLaunchArgument('failure_rate',  default_value='0.0',
-            description='Robot failure probability per minute (0-0.45)'),
-        DeclareLaunchArgument('map_resolution',default_value='0.1',
-            description='Occupancy grid resolution in m/cell'),
-        DeclareLaunchArgument('world',         default_value='warehouse',
-            description='World name to load (no extension)'),
+        DeclareLaunchArgument('num_robots',    default_value='5'),
+        DeclareLaunchArgument('sensor_range',  default_value='5.0'),
+        DeclareLaunchArgument('comm_radius',   default_value='8.0'),
+        DeclareLaunchArgument('noise_level',   default_value='0.0'),
+        DeclareLaunchArgument('failure_rate',  default_value='0.0'),
+        DeclareLaunchArgument('map_resolution',default_value='0.1'),
+        DeclareLaunchArgument('world',         default_value='warehouse'),
 
-        # ── Gazebo simulation ─────────────────────────────────────────────────
-        Node(
-            package='ros_gz_sim',
-            executable='gzserver',
-            name='gazebo',
-            arguments=[
-                PathJoinSubstitution([
-                    FindPackageShare('swarmap_bringup'), 'worlds',
-                    [LaunchConfiguration('world'), '.sdf']
-                ]),
-                '--verbose',
-            ],
-            parameters=[{'use_sim_time': True}],
-            output='screen',
-        ),
+        # ── Ignition Gazebo Fortress (version 6) ─────────────────────────────
+        OpaqueFunction(function=launch_gazebo),
 
         # ── Dynamic robot spawning ────────────────────────────────────────────
         OpaqueFunction(function=generate_robot_spawn_actions),

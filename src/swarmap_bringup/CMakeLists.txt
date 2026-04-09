@@ -3,7 +3,7 @@ project(swarmap_bringup)
 
 find_package(ament_cmake REQUIRED)
 
-install(DIRECTORY launch config worlds urdf rviz
+install(DIRECTORY launch config worlds urdf rviz models
   DESTINATION share/${PROJECT_NAME}
 )
 
