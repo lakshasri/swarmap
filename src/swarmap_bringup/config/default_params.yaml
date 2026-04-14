@@ -2,7 +2,7 @@
   ros__parameters:
     # ── Simulation ────────────────────────────────────────────────────────────
     num_robots: 10           # number of robots to spawn
-    use_sim_time: true
+    use_sim_time: false
 
     # ── Sensor ────────────────────────────────────────────────────────────────
     sensor_range: 5.0        # LiDAR max range in metres

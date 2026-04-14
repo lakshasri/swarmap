@@ -11,15 +11,7 @@
 
   <exec_depend>swarmap_core</exec_depend>
   <exec_depend>swarmap_msgs</exec_depend>
-  <exec_depend>ros_gz_sim</exec_depend>
-  <exec_depend>ros_gz_bridge</exec_depend>
-  <exec_depend>robot_state_publisher</exec_depend>
-  <exec_depend>xacro</exec_depend>
-
-  <test_depend>launch_testing_ament_cmake</test_depend>
-  <test_depend>launch_testing</test_depend>
-  <test_depend>ament_cmake_pytest</test_depend>
-  <test_depend>swarmap_msgs</test_depend>
+  <exec_depend>rviz2</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>
