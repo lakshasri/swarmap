@@ -33,6 +33,13 @@ results/**
 *.bag
 *.bag.db3
 
+# MATLAB outputs
+matlab/results/*
+!matlab/results/.gitkeep
+matlab/worlds/generated_*
+*.asv
+*.m~
+
 # Node modules
 node_modules/
 # Keep package-lock.json for reproducible npm ci
