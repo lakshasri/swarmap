@@ -9,7 +9,7 @@ classdef MapGenerator
         function [grid, metadata] = generate(type, width, height, resolution, seed)
             if nargin < 5, seed = 0; end
             if nargin < 4, resolution = 0.1; end
-            rng(seed);
+            try, rng(seed); catch, rand('state', seed); randn('state', seed); end
 
             cols = round(width / resolution);
             rows = round(height / resolution);

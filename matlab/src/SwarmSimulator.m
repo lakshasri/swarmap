@@ -40,7 +40,7 @@ classdef SwarmSimulator < handle
             obj.FailureRate = p.Results.FailureRate;
             obj.NoiseLevel  = p.Results.NoiseLevel;
             obj.MapResolution = p.Results.MapResolution;
-            rng(p.Results.Seed);
+            try, rng(p.Results.Seed); catch, rand('state', p.Results.Seed); randn('state', p.Results.Seed); end
 
             obj.GlobalMap = -1 * ones(size(env));
             obj.Robots = obj.spawnRobots_();

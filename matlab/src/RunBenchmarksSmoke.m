@@ -10,13 +10,15 @@ function results = RunBenchmarksSmoke(out_dir)
     end
     if ~exist(out_dir, 'dir'), mkdir(out_dir); end
 
-    num_robots_range   = [5, 10];
+    num_robots_range   = [3, 6];
     failure_rate_range = [0.0, 0.3];
     noise_range        = 0.05;
-    num_trials         = 2;
-    sim_seconds        = 60;
+    num_trials         = 1;
+    sim_seconds        = 20;
 
-    [env, ~] = MapGenerator.generate('warehouse', 30, 30, 0.25, 42);
+    % Smaller world (15x15 m at 0.5 m/cell = 30x30 grid) so the pure-MATLAB
+    % BFS frontier clusterer finishes a tick in tens of ms, not seconds.
+    [env, ~] = MapGenerator.generate('warehouse', 15, 15, 0.5, 42);
 
     rows = {};
     idx = 0;

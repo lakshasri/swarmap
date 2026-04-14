@@ -24,16 +24,41 @@ classdef FrontierExplorer
 
         function clusters = clusterFrontiers(frontier_mask, min_size)
             if nargin < 2, min_size = 4; end
-            cc = bwconncomp(frontier_mask, 8);
+            % 8-connected BFS labelling — pure-MATLAB so we don't depend on
+            % the Image Processing Toolbox or octave-image's bwconncomp.
+            [rows, cols] = size(frontier_mask);
+            visited = false(rows, cols);
             clusters = struct('idx', {}, 'centroid', {}, 'size', {});
-            for i = 1:cc.NumObjects
-                px = cc.PixelIdxList{i};
-                if numel(px) < min_size, continue; end
-                [r, c] = ind2sub(size(frontier_mask), px);
-                clusters(end+1) = struct( ...
-                    'idx', px, ...
-                    'centroid', [mean(r), mean(c)], ...
-                    'size', numel(px)); %#ok<AGROW>
+            dr = [-1 -1 -1 0 0 1 1 1];
+            dc = [-1 0 1 -1 1 -1 0 1];
+            for r0 = 1:rows
+                for c0 = 1:cols
+                    if ~frontier_mask(r0, c0) || visited(r0, c0), continue; end
+                    queue = [r0 c0];
+                    qhead = 1;
+                    px_r = []; px_c = [];
+                    while qhead <= size(queue, 1)
+                        rc = queue(qhead, :); qhead = qhead + 1;
+                        r = rc(1); c = rc(2);
+                        if visited(r, c), continue; end
+                        visited(r, c) = true;
+                        px_r(end+1) = r; %#ok<AGROW>
+                        px_c(end+1) = c; %#ok<AGROW>
+                        for k = 1:8
+                            nr = r + dr(k); nc = c + dc(k);
+                            if nr < 1 || nr > rows || nc < 1 || nc > cols, continue; end
+                            if frontier_mask(nr, nc) && ~visited(nr, nc)
+                                queue(end+1, :) = [nr nc]; %#ok<AGROW>
+                            end
+                        end
+                    end
+                    if numel(px_r) < min_size, continue; end
+                    px = sub2ind([rows cols], px_r(:), px_c(:));
+                    clusters(end+1) = struct( ...
+                        'idx', px, ...
+                        'centroid', [mean(px_r), mean(px_c)], ...
+                        'size', numel(px_r)); %#ok<AGROW>
+                end
             end
         end
 
