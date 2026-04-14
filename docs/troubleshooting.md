@@ -95,3 +95,32 @@
 2. Check the rate parameter: `ros2 param get /failure_injector_node failure_rate`
 3. Set it live: `ros2 param set /failure_injector_node failure_rate 0.1`
 4. Monitor events: `ros2 topic echo /swarm/events`
+
+---
+
+## 9. MATLAB can't find ros2 / ros2node errors
+
+**Symptom:** `Undefined function 'ros2node'` or `ros2subscriber` in MATLAB.
+
+**Fixes:**
+1. Install the ROS Toolbox: *Home → Add-Ons → ROS Toolbox*.
+2. Source ROS2 **before** launching MATLAB so `PYTHONPATH` and `LD_LIBRARY_PATH` are set:
+   `source /opt/ros/humble/setup.bash && matlab &`.
+3. Verify: `>> ros2 topic list` from the MATLAB command window.
+4. Custom messages: rebuild with `ros2genmsg('<path-to-swarmap_msgs>')`.
+5. If running headless on a server: start MATLAB with `-nodisplay` and
+   set `set(gcf,'Visible','off')` before any plotting.
+
+---
+
+## 10. Integration tests time out
+
+**Symptom:** `colcon test --packages-select swarmap_bringup` fails because
+Gazebo takes too long to bring up N robots in CI.
+
+**Fixes:**
+1. Run locally — the launch tests need ~4 GB RAM and a real Gazebo.
+2. Enable headless rendering: `export LIBGL_ALWAYS_SOFTWARE=1`.
+3. Override the default timeout in `CMakeLists.txt` (`add_launch_test(... TIMEOUT 300)`).
+4. Leave `SWARMAP_RUN_INTEGRATION` unset in GitHub Actions — only C++ unit
+   tests run in CI by default.
