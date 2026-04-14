@@ -40,6 +40,10 @@ matlab/worlds/generated_*
 *.asv
 *.m~
 
+# Node modules (dashboard)
+node_modules/
+yarn.lock
+
 # Environment
 .env
 .env.local

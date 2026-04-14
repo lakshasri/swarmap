@@ -14,19 +14,25 @@ distributed frontier auction to decide where to go next so the swarm doesn't
 duplicate effort. The system is robust to failures: when nearly half the
 robots die mid-mission, the survivors keep mapping.
 
-Visualisation is **RViz2** — the native ROS2 viewer. The simulated world,
-LiDAR rays, robot poses, the merged occupancy grid, and frontier markers
-all render in one window. There is no browser or Gazebo dependency.
+Visualisation comes in two flavours, both backed by the same ROS2 stack:
+
+- **RViz2** — the native ROS2 viewer (default). One window with the merged
+  occupancy grid, robot poses, LiDAR rays, frontier markers.
+- **Browser dashboard** (opt-in) — React + Vite, talks to the swarm via
+  rosbridge WebSocket; map canvas, stats, comm graph, mission replay.
+
+There is no Gazebo dependency.
 
 ## Stack
 
 - **ROS2 Humble** — middleware
 - **C++17** — robot, frontier auction, map merger, aggregator (`swarmap_core`)
 - **Python** — pure-ROS world simulator (`world_sim_node.py`) + swarm monitor
-- **RViz2** — visualisation
+- **RViz2** — primary visualisation
+- **React + Vite + rosbridge** — optional browser dashboard (`swarmap_dashboard`)
 - **MATLAB** — offline scaling + fault-tolerance benchmarks (`matlab/`)
 
-There is no Gazebo, no rosbridge, no React dashboard.
+There is no Gazebo.
 
 ## Quick start
 
@@ -42,6 +48,20 @@ ros2 launch swarmap_bringup simulation.launch.py num_robots:=10
 
 RViz opens automatically with `swarm_debug.rviz` showing the merged map,
 robot poses, LiDAR scans, and frontier markers.
+
+### With the browser dashboard
+
+```bash
+# one-time
+(cd src/swarmap_dashboard && npm install)
+
+# then
+ros2 launch swarmap_bringup simulation.launch.py num_robots:=10 dashboard:=true
+```
+
+This adds rosbridge on `ws://localhost:9090` and a Vite dev server on
+`http://localhost:5173`. Open the browser to that URL — MapCanvas,
+StatsPanel, ControlPanel, NetworkGraph, ReplayPanel.
 
 ## Demo scenarios
 
@@ -59,7 +79,8 @@ Scaling and fault tolerance are evaluated in MATLAB, headless and fast:
 
 ```matlab
 addpath(genpath('matlab/src'))
-RunBenchmarks('results/benchmark')   % sweeps swarm size + failure rate, writes PDF
+RunBenchmarks('results/benchmark')        % full ~720-trial sweep (slow)
+RunBenchmarksSmoke('results/benchmark')   % 8 trials, finishes in ~2 min
 ```
 
 See [matlab/README.md](matlab/README.md) for details.
@@ -78,4 +99,4 @@ every robot's map into `/swarm/global_map` (an `OccupancyGrid`) for RViz.
 
 ---
 
-**Status:** RViz-native simulation, MATLAB benchmarks, CI green.
+**Status:** RViz + browser dashboard simulation, MATLAB benchmarks, CI green.

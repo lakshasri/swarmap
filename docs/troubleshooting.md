@@ -80,7 +80,22 @@ expected; topics produce no messages.
 
 ---
 
-## 7. World sim runs but robots collide with walls non-stop
+## 7. Browser dashboard shows "Disconnected"
+
+**Symptom:** Page loads at http://localhost:5173 but the indicator stays red.
+
+**Fixes:**
+1. Make sure you launched with `dashboard:=true` (`ros2 launch swarmap_bringup
+   simulation.launch.py num_robots:=10 dashboard:=true`).
+2. Verify rosbridge is up: `ss -tln | grep 9090`.
+3. Verify topics flow: `ros2 topic echo /dashboard/stats --once`.
+4. If using Docker / a remote box, the WS URL may need to be the
+   machine's IP, not `localhost` — edit
+   `src/swarmap_dashboard/src/hooks/useRosBridge.ts`.
+
+---
+
+## 8. World sim runs but robots collide with walls non-stop
 
 **Symptom:** Multiple robots stuck against perimeter; no exploration progress.
 
