@@ -57,7 +57,7 @@ install(TARGETS robot_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
-# ── map_aggregator_node ───────────────────────────────────────────────────────
+# ── map_aggregator_node (RViz global map + frontier markers) ──────────────────
 add_executable(map_aggregator_node src/map_aggregator_node.cpp)
 ament_target_dependencies(map_aggregator_node ${DEPS})
 target_include_directories(map_aggregator_node PUBLIC
@@ -75,12 +75,11 @@ target_include_directories(failure_injector_node PUBLIC
 )
 install(TARGETS failure_injector_node DESTINATION lib/${PROJECT_NAME})
 
-# ── Python nodes (swarm_monitor, param_service) ───────────────────────────────
+# ── Python nodes (world_sim, swarm_monitor) ───────────────────────────────────
 ament_python_install_package(${PROJECT_NAME})
 install(PROGRAMS
+  src/world_sim_node.py
   src/swarm_monitor_node.py
-  src/param_service_node.py
-  src/robot_spawner_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -61,8 +61,8 @@ public:
         global_map_.info.resolution    = res;
         global_map_.info.width         = static_cast<uint32_t>(w);
         global_map_.info.height        = static_cast<uint32_t>(h);
-        global_map_.info.origin.position.x = -(w * res / 2.0);
-        global_map_.info.origin.position.y = -(h * res / 2.0);
+        global_map_.info.origin.position.x = 0.0;
+        global_map_.info.origin.position.y = 0.0;
         global_map_.info.origin.orientation.w = 1.0;
         global_map_.data.assign(static_cast<size_t>(w * h), -1);
 
