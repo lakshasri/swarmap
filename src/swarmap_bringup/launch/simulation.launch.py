@@ -3,14 +3,18 @@
 Brings up:
   - world_sim_node: ground-truth grid, ray-cast LiDAR, odom + cmd_vel feedback
   - N robot_node lifecycle nodes (each in its own /robot_i namespace)
-  - failure_injector + swarm_monitor
-  - RViz2 with swarm_debug.rviz config
+  - map_aggregator + failure_injector + swarm_monitor
+  - RViz2 with swarm_debug.rviz config (rviz:=true, default)
+  - Optional browser dashboard (dashboard:=true) — chains dashboard.launch.py
+    which starts rosbridge_server (port 9090) + Vite dev server (port 5173)
 """
 import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import (DeclareLaunchArgument, IncludeLaunchDescription,
+                            OpaqueFunction)
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -27,6 +31,7 @@ def launch_world_and_swarm(context, *_args, **_kwargs):
     noise_level = float(LaunchConfiguration('noise_level').perform(context))
     map_res = float(LaunchConfiguration('map_resolution').perform(context))
     use_rviz = LaunchConfiguration('rviz').perform(context).lower() in ('1', 'true', 'yes')
+    use_dashboard = LaunchConfiguration('dashboard').perform(context).lower() in ('1', 'true', 'yes')
 
     common = {
         'num_robots': n,
@@ -90,6 +95,12 @@ def launch_world_and_swarm(context, *_args, **_kwargs):
             output='log',
         ))
 
+    if use_dashboard:
+        actions.append(IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(bringup_share, 'launch', 'dashboard.launch.py'))
+        ))
+
     return actions
 
 
@@ -102,6 +113,7 @@ def generate_launch_description():
         DeclareLaunchArgument('failure_rate', default_value='0.0'),
         DeclareLaunchArgument('map_resolution', default_value='0.1'),
         DeclareLaunchArgument('rviz', default_value='true'),
+        DeclareLaunchArgument('dashboard', default_value='false'),
 
         OpaqueFunction(function=launch_world_and_swarm),
     ])

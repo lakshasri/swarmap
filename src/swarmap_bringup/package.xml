@@ -12,6 +12,7 @@
   <exec_depend>swarmap_core</exec_depend>
   <exec_depend>swarmap_msgs</exec_depend>
   <exec_depend>rviz2</exec_depend>
+  <exec_depend>rosbridge_server</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>
