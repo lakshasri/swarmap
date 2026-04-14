@@ -1,105 +1,96 @@
 # Swarmap — Demo Script
 
-Use this script during the final presentation. Each scenario has an estimated runtime and a list of talking points. Run them in order.
+Use this script during the final presentation. Run scenarios in order.
+Visualisation is **RViz2**, which the launch file opens automatically.
 
 ---
 
 ## Pre-demo checklist (5 min before)
 
-- [ ] `source install/setup.bash` in every terminal
-- [ ] Browser open at `http://localhost:5173` (dashboard)
-- [ ] RViz2 open with `rviz/swarm_debug.rviz`
-- [ ] `ROS_DOMAIN_ID=0` set everywhere
-- [ ] Gazebo window ready but not yet launched
+- [ ] `source /opt/ros/humble/setup.bash` and `source install/setup.bash`
+      in every terminal.
+- [ ] `ROS_DOMAIN_ID=0` set everywhere.
+- [ ] Workspace built clean (`colcon build --symlink-install`).
+- [ ] MATLAB open with `matlab/src/` on the path (for the scaling demo).
+- [ ] Test the smoke launch once: `ros2 launch swarmap_bringup
+      simulation.launch.py num_robots:=3` — close it after 30 s.
 
 ---
 
 ## Scenario 1 — Basic multi-robot exploration (~8 min)
 
-**Goal:** Show 10 robots cooperatively mapping the warehouse world.
+**Goal:** Show 10 robots cooperatively mapping the procedural world.
 
 ### Steps
 
-1. **Launch simulation**
+1. Launch simulation:
    ```bash
    ros2 launch swarmap_bringup simulation.launch.py \
-     num_robots:=10 world:=warehouse noise_level:=0.0
+       num_robots:=10 noise_level:=0.0
    ```
-
-2. **Point out:** robots spawn in a grid pattern and immediately begin broadcasting discovery pings. Switch to RViz — show TF tree and laser scans.
-
-3. **Point out dashboard:** MapCanvas starts filling in (grey → black/white); StatsPanel shows 10 active robots, coverage climbing from 0%.
-
-4. **Explain frontier auction:** each robot picks the highest-scoring unclaimed frontier. No two robots target the same cell.
-
-5. **Wait for ~80% coverage** (~5 min). Show final merged map vs ground truth in RViz.
-
-**Talking points:**
-- Distributed algorithm — no central coordinator
-- Map merging via weighted log-odds confidence
-- Anti-revisit penalty prevents robots revisiting explored areas
+2. RViz opens. Talking points:
+   - Robots spawn evenly along the world, each in its own
+     `/robot_i` namespace.
+   - LiDAR scans render as point clouds on top of the merged map.
+   - As exploration proceeds, the merged map (`/swarm/global_map`) fills in.
+3. Point at a frontier marker and explain the auction: the closest
+   un-claimed centroid wins, ties break by `robot_id`.
+4. Open a side terminal and show coverage growing:
+   ```bash
+   ros2 topic echo /swarm/health
+   ```
 
 ---
 
-## Scenario 2 — Fault tolerance (~6 min)
+## Scenario 2 — Fault tolerance under fire (~10 min)
 
-**Goal:** Demonstrate graceful degradation when robots fail.
+**Goal:** Show that the swarm survives 40% mid-mission failures.
 
 ### Steps
 
-1. **Relaunch with failure injection:**
+1. Stop the previous launch (Ctrl-C).
+2. Launch the failure scenario:
    ```bash
-   ros2 launch swarmap_bringup simulation.launch.py \
-     num_robots:=10 world:=warehouse failure_rate:=0.08 failure_mode:=progressive
+   ros2 launch swarmap_bringup demo_fault_tolerance.launch.py
    ```
-
-2. **Open the ControlPanel:** set failure rate slider to 0.08, mode = progressive.
-
-3. **Watch the NetworkGraph:** edges disappear as robots fail; failed robots show ✕ overlay.
-
-4. **StatsPanel:** active robot count drops; coverage growth slows but does not stop. Surviving robots continue claiming freed frontiers.
-
-5. **Check failure log:**
+3. RViz comes up again. Talking points:
+   - The injector node will start killing random robots ~30 s in.
+   - Watch the surviving robots pick up orphaned frontiers (they
+     re-bid and win because dead bidders have expired).
+   - The merged map keeps filling; the dead robot's last contribution
+     stays visible.
+4. In a side terminal:
    ```bash
-   cat results/demo_fault_tolerance/failure_log.csv
+   ros2 topic echo /swarm/events
    ```
-
-**Talking points:**
-- Heartbeat-based detection (no ping > 3 s → declared failed)
-- Surviving robots transparently absorb the load
-- Failure log records every event for post-analysis
+   to narrate each shutdown live.
 
 ---
 
-## Scenario 3 — Scalability benchmark (~4 min)
+## Scenario 3 — MATLAB scaling + fault-tolerance benchmark (~5 min)
 
-**Goal:** Show coverage speed improves with robot count.
+**Goal:** Show *quantitatively* that the swarm scales and tolerates failure.
 
 ### Steps
 
-1. Show `results/benchmark/sweep_results.csv` (pre-generated):
-   | N robots | Time to 90% coverage |
-   |----------|---------------------|
-   | 5        | ~420 s              |
-   | 10       | ~210 s              |
-   | 15       | ~145 s              |
-   | 20       | ~105 s              |
-
-2. Show the `plots/` charts — near-linear speed-up up to ~15 robots, then communication overhead flattens the curve.
-
-3. **Live demo** (optional — only if time allows):
-   ```bash
-   ros2 launch swarmap_bringup simulation.launch.py num_robots:=20 world:=large_office
+1. In MATLAB:
+   ```matlab
+   addpath(genpath('matlab/src'))
+   RunBenchmarks('results/benchmark')
    ```
-
-**Talking points:**
-- Communication overhead grows as O(N²) — motivates comm_radius cap
-- Map delta compression keeps WebSocket bandwidth under 1 MB/s at 20 robots
+2. The script sweeps:
+   - swarm size: 1 → 50 robots
+   - failure rate: 0% → 60%
+   and writes a PDF + CSV into `results/benchmark/`.
+3. Open the resulting PDF and walk through:
+   - Coverage vs. swarm size (sub-linear — diminishing returns past ~30).
+   - Coverage vs. failure rate (graceful degradation, knee around 50%).
 
 ---
 
-## Q&A prompts
+## Wrap-up
 
-- "How do robots avoid collisions?" — no explicit collision avoidance; the frontier scorer penalises nearby frontiers and the diff-drive stops at walls via LiDAR range_max.
-- "Why not use Nav2?" — intentional choice; demonstrates the core algorithm without middleware complexity.
-- "What does 'confidence' mean in PartialMap?" — absolute value of log-odds probability mapped to [0, 1]; higher = more observations agree.
+- Hand-off: the unit-test suite (`colcon test --packages-select swarmap_core`)
+  proves the algorithms are correct in isolation.
+- The MATLAB benchmark proves they scale.
+- The two RViz demos prove the live system works end to end.

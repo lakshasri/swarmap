@@ -1,44 +1,18 @@
 # Swarmap — Troubleshooting Guide
 
-## 1. rosbridge WebSocket connection refused
+## 1. ROS_DOMAIN_ID mismatch — nodes can't see each other
 
-**Symptom:** Dashboard shows "Disconnected" and browser console shows `WebSocket connection to ws://localhost:9090 failed`.
-
-**Fixes:**
-1. Confirm rosbridge is running: `ros2 node list | grep rosbridge`
-2. Check the port: `ss -tlnp | grep 9090`
-3. Restart rosbridge: `ros2 launch rosbridge_server rosbridge_websocket_launch.xml port:=9090`
-4. In Docker, ensure `network_mode: host` is set so port 9090 is reachable from the host browser.
-5. Firewall check: `sudo ufw status` — port 9090 must be allowed.
-
----
-
-## 2. ROS_DOMAIN_ID mismatch — nodes can't see each other
-
-**Symptom:** `ros2 node list` or `ros2 topic list` shows fewer nodes than expected; topics produce no messages.
+**Symptom:** `ros2 node list` or `ros2 topic list` shows fewer nodes than
+expected; topics produce no messages.
 
 **Fixes:**
 1. Check the domain ID in every terminal: `echo $ROS_DOMAIN_ID`
-2. All terminals (and Docker containers) must share the same ID. Set it: `export ROS_DOMAIN_ID=0`
-3. Add to `~/.bashrc` to persist: `echo "export ROS_DOMAIN_ID=0" >> ~/.bashrc`
-4. In Docker Compose this is set via the `environment` block — see `docker-compose.yml`.
+2. All terminals must share the same ID. Set it: `export ROS_DOMAIN_ID=0`
+3. Persist it: `echo "export ROS_DOMAIN_ID=0" >> ~/.bashrc`
 
 ---
 
-## 3. Gazebo crashes or freezes at startup
-
-**Symptom:** `gzserver` process exits immediately or hangs; robots never appear in the scene.
-
-**Fixes:**
-1. Check GPU drivers: `nvidia-smi` (NVIDIA) or `glxinfo | grep renderer` (Mesa).
-2. Run headless: add `--headless-rendering` to the `gzserver` arguments in `simulation.launch.py`.
-3. Reduce robot count: `ros2 launch swarmap_bringup simulation.launch.py num_robots:=3`
-4. Confirm the world file loads: `gz sim src/swarmap_bringup/worlds/warehouse.sdf`
-5. Missing Gazebo model path: `export GZ_SIM_RESOURCE_PATH=/path/to/swarmap_bringup/urdf`
-
----
-
-## 4. colcon build failures
+## 2. colcon build failures
 
 **Symptom:** `colcon build` exits non-zero; errors mention missing packages.
 
@@ -50,43 +24,37 @@
 
 ---
 
-## 5. robots spawn but don't move (all stay IDLE)
+## 3. Robots spawn but don't move (all stay IDLE)
 
-**Symptom:** RobotStatus always shows `current_state: IDLE`; no cmd_vel messages.
+**Symptom:** RobotStatus always shows `current_state: IDLE`; no `cmd_vel`.
 
 **Fixes:**
 1. Confirm LiDAR data arrives: `ros2 topic echo /robot_0/scan --once`
 2. Confirm odometry arrives: `ros2 topic echo /robot_0/odom --once`
-3. Increase map resolution or map size so the grid isn't immediately fully known:
+3. Increase map resolution so the grid isn't immediately fully known:
    `ros2 launch swarmap_bringup simulation.launch.py map_resolution:=0.2`
-4. Set `use_sim_time:=true` everywhere — missing sim time causes timer starvation.
+4. `world_sim_node` must be running: `ros2 node list | grep world_sim`
 
 ---
 
-## 6. Dashboard shows blank map / no data
+## 4. RViz shows "No transform" or empty map
 
-**Symptom:** MapCanvas is empty; StatsPanel shows 0 robots.
+**Symptom:** RViz reports `Fixed Frame [map] does not exist` or the
+`OccupancyGrids` display stays grey.
 
 **Fixes:**
-1. Confirm `map_aggregator_node` is running: `ros2 node list | grep aggregator`
-2. Check `/dashboard/stats` is publishing: `ros2 topic echo /dashboard/stats --once`
-3. Verify rosbridge is forwarding: open browser devtools → Network → WS frames.
-4. Check `VITE_WS_URL` in the dashboard `.env` or `vite.config.ts` matches the rosbridge port.
+1. The fixed frame must be `map`. World sim broadcasts `map → robot_i/odom`
+   as a static transform, and `robot_node` broadcasts `robot_i/odom →
+   robot_i/base_link`.
+2. Confirm the static TFs are present: `ros2 run tf2_ros tf2_echo map robot_0/odom`
+3. Confirm the global map publishes:
+   `ros2 topic hz /swarm/global_map` should show ~1 Hz.
+4. If only the ground truth shows up but no exploration map, the aggregator
+   may not have started — check `ros2 node list | grep aggregator`.
 
 ---
 
-## 7. npm install / build fails for dashboard
-
-**Symptom:** `npm install` exits with peer dependency errors or `npm run build` fails.
-
-**Fixes:**
-1. Ensure Node.js ≥ 20: `node --version`
-2. Delete lockfile and retry: `rm package-lock.json && npm install`
-3. Inside Docker, run: `docker-compose run --rm frontend bash -c "npm install"`
-
----
-
-## 8. Failure injector has no effect
+## 5. Failure injector has no effect
 
 **Symptom:** Robots never fail even with `failure_rate > 0`.
 
@@ -98,29 +66,28 @@
 
 ---
 
-## 9. MATLAB can't find ros2 / ros2node errors
+## 6. MATLAB can't find ros2 / ros2node errors
 
 **Symptom:** `Undefined function 'ros2node'` or `ros2subscriber` in MATLAB.
 
 **Fixes:**
 1. Install the ROS Toolbox: *Home → Add-Ons → ROS Toolbox*.
-2. Source ROS2 **before** launching MATLAB so `PYTHONPATH` and `LD_LIBRARY_PATH` are set:
-   `source /opt/ros/humble/setup.bash && matlab &`.
+2. Source ROS2 **before** launching MATLAB so `PYTHONPATH` and `LD_LIBRARY_PATH`
+   are set: `source /opt/ros/humble/setup.bash && matlab &`.
 3. Verify: `>> ros2 topic list` from the MATLAB command window.
 4. Custom messages: rebuild with `ros2genmsg('<path-to-swarmap_msgs>')`.
-5. If running headless on a server: start MATLAB with `-nodisplay` and
-   set `set(gcf,'Visible','off')` before any plotting.
+5. Headless: launch MATLAB with `-nodisplay`.
 
 ---
 
-## 10. Integration tests time out
+## 7. World sim runs but robots collide with walls non-stop
 
-**Symptom:** `colcon test --packages-select swarmap_bringup` fails because
-Gazebo takes too long to bring up N robots in CI.
+**Symptom:** Multiple robots stuck against perimeter; no exploration progress.
 
 **Fixes:**
-1. Run locally — the launch tests need ~4 GB RAM and a real Gazebo.
-2. Enable headless rendering: `export LIBGL_ALWAYS_SOFTWARE=1`.
-3. Override the default timeout in `CMakeLists.txt` (`add_launch_test(... TIMEOUT 300)`).
-4. Leave `SWARMAP_RUN_INTEGRATION` unset in GitHub Actions — only C++ unit
-   tests run in CI by default.
+1. Lower `num_robots` so they aren't packed against each other.
+2. Increase `linear_speed_cap` / `angular_speed_cap` if mapping needs to
+   reach far frontiers faster (params on `world_sim_node`).
+3. The procedural world is generated from a fixed seed; if the layout is
+   unfortunate, change the seed in `build_world(...)` inside
+   `src/swarmap_core/src/world_sim_node.py`.

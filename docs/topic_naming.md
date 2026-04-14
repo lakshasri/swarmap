@@ -1,46 +1,48 @@
 # Swarmap — ROS2 Topic Naming Reference
 
 All per-robot topics are namespaced under `/{robot_id}/` (e.g., `/robot_0/scan`).
-Global swarm topics live under `/swarm/` or `/dashboard/`.
+Global swarm topics live under `/swarm/`. World-truth topics under `/world/`.
 
 ## Per-robot topics
 
 | Topic | Type | Publisher | Subscribers | Notes |
 |-------|------|-----------|-------------|-------|
-| `/{id}/scan` | `sensor_msgs/LaserScan` | Gazebo bridge | `robot_node` | LiDAR scan at 10 Hz |
-| `/{id}/odom` | `nav_msgs/Odometry` | Gazebo bridge | `robot_node` | Wheel odometry |
-| `/{id}/cmd_vel` | `geometry_msgs/Twist` | `robot_node` | Gazebo bridge | Velocity command |
-| `/{id}/map` | `swarmap_msgs/PartialMap` | `robot_node` | Neighbours' `robot_node`, `map_aggregator_node` | Local occupancy grid chunk at 2 Hz |
-| `/{id}/status` | `swarmap_msgs/RobotStatus` | `robot_node` | `swarm_monitor_node`, `map_aggregator_node` | State, battery, neighbour list at 1 Hz |
-| `/{id}/frontier_bid` | `swarmap_msgs/FrontierBid` | `robot_node` | Neighbours' `robot_node` | Claim/release messages during auction |
-| `/{id}/map_accuracy` | `std_msgs/Float32` | `robot_node` | `map_aggregator_node` | Local map accuracy vs ground truth [0–1] |
+| `/{id}/scan` | `sensor_msgs/LaserScan` | `world_sim_node` | `robot_node` | 180-ray ray-cast against ground truth at 10 Hz |
+| `/{id}/odom` | `nav_msgs/Odometry` | `world_sim_node` | `robot_node` | Pose integrated from `/cmd_vel` at 10 Hz |
+| `/{id}/cmd_vel` | `geometry_msgs/Twist` | `robot_node` | `world_sim_node` | Linear + angular velocity command |
+| `/{id}/map` | `swarmap_msgs/PartialMap` | `robot_node` | Neighbours' `robot_node`, `map_aggregator_node` | Local occupancy grid delta at 2 Hz |
+| `/{id}/status` | `swarmap_msgs/RobotStatus` | `robot_node` | `swarm_monitor_node`, `map_aggregator_node` | State, battery, neighbours at 1 Hz |
+| `/{id}/frontier_bid` | `swarmap_msgs/FrontierBid` | `robot_node` | Neighbours' `robot_node` | Auction claim/release |
+| `/{id}/map_accuracy` | `std_msgs/Float32` | `robot_node` | `map_aggregator_node` | Local map vs ground truth [0–1] |
 
 ## Global swarm topics
 
 | Topic | Type | Publisher | Subscribers | Notes |
 |-------|------|-----------|-------------|-------|
 | `/swarm/discovery` | `swarmap_msgs/NeighbourDiscovery` | All `robot_node` | All `robot_node` | Broadcast ping at 2 Hz |
-| `/swarm/health` | `std_msgs/String` (JSON) | `swarm_monitor_node` | `map_aggregator_node`, dashboard | Active/failed robot list at 1 Hz |
-| `/swarm/events` | `std_msgs/String` (JSON) | `failure_injector_node` | `map_aggregator_node` | Failure event stream |
-| `/swarm/global_map` | `nav_msgs/OccupancyGrid` | `map_aggregator_node` | RViz, dashboard | Full merged map (Transient Local, 1 Hz) |
+| `/swarm/health` | `std_msgs/String` (JSON) | `swarm_monitor_node` | RViz overlays, ops | Active/failed robots at 1 Hz |
+| `/swarm/events` | `std_msgs/String` (JSON) | `failure_injector_node` | `map_aggregator_node`, ops | Failure event stream |
+| `/swarm/global_map` | `nav_msgs/OccupancyGrid` | `map_aggregator_node` | RViz | Merged exploration map (Transient Local, 1 Hz) |
 | `/swarm/frontier_markers` | `visualization_msgs/MarkerArray` | `map_aggregator_node` | RViz | Frontier cluster visualisation |
 
-## Dashboard topics
+## World-truth topics (debug / RViz backdrop)
 
 | Topic | Type | Publisher | Subscribers | Notes |
 |-------|------|-----------|-------------|-------|
-| `/dashboard/stats` | `std_msgs/String` (JSON) | `map_aggregator_node` | Frontend via rosbridge | Coverage %, robot table, accuracy at 1 Hz |
-| `/dashboard/map_compressed` | `std_msgs/String` (JSON) | `map_aggregator_node` | Frontend via rosbridge | Base64 delta-encoded grid, ≤ 1 MB/s |
-| `/dashboard/network_topology` | `std_msgs/String` (JSON) | `swarm_monitor_node` | Frontend via rosbridge | Adjacency list for NetworkGraph |
-| `/dashboard/events` | `std_msgs/String` (JSON) | `map_aggregator_node` | Frontend via rosbridge | Human-readable event log |
+| `/world/ground_truth` | `nav_msgs/OccupancyGrid` | `world_sim_node` | RViz, MATLAB bridge | Static ground-truth grid, republished every 2 s |
 
-## Services
+## TF tree
 
-| Service | Type | Server | Notes |
-|---------|------|--------|-------|
-| `/swarm/set_param` | `rcl_interfaces/srv/SetParameters` (wrapped) | `param_service_node` | Broadcasts value to all robot parameter servers |
-| `/swarm/set_num_robots` | `std_srvs/srv/SetBool` (wrapped) | `param_service_node` | Spawn or shutdown robots dynamically |
+```
+map
+ ├── robot_0/odom  (static, identity, broadcast by world_sim_node)
+ │    └── robot_0/base_link  (dynamic, broadcast by world_sim_node + robot_node)
+ ├── robot_1/odom
+ │    └── robot_1/base_link
+ ...
+```
 
 ## ROS2 Domain
 
-All nodes run under `ROS_DOMAIN_ID=0` by default. Change via environment variable or `default_params.yaml` to isolate multiple simultaneous experiments.
+All nodes run under `ROS_DOMAIN_ID=0` by default. Change via the env variable
+to isolate multiple simultaneous experiments on the same network.

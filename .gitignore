@@ -40,11 +40,6 @@ matlab/worlds/generated_*
 *.asv
 *.m~
 
-# Node modules
-node_modules/
-# Keep package-lock.json for reproducible npm ci
-yarn.lock
-
 # Environment
 .env
 .env.local
