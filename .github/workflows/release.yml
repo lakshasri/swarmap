@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  publish-artifacts:
+    name: Attach benchmark artifacts to the GitHub release
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bundle plan + docs
+        run: |
+          cd Swarmap
+          mkdir -p _release
+          cp -r docs plans README.md _release/
+          if [ -d results/benchmark ]; then
+            cp -r results/benchmark _release/benchmark
+          fi
+          tar -czf swarmap-${{ github.ref_name }}.tar.gz -C _release .
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            Swarmap/swarmap-${{ github.ref_name }}.tar.gz
+            Swarmap/results/benchmark/benchmark_report_*.pdf
+          fail_on_unmatched_files: false
+          generate_release_notes: true

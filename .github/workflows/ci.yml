@@ -33,12 +33,25 @@ jobs:
           cd Swarmap
           colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
 
-      - name: Run C++ tests
+      - name: Run C++ unit tests
         run: |
           source /opt/ros/humble/setup.bash
           cd Swarmap
           source install/setup.bash
-          colcon test --packages-select swarmap_core
+          colcon test --packages-select swarmap_core swarmap_msgs
+          colcon test-result --verbose
+
+      # Launch-based integration tests require a display-less Gazebo.
+      # They're opt-in via the SWARMAP_RUN_INTEGRATION env flag because
+      # they need ~4 GB RAM and ~10 min runtime.
+      - name: Run launch integration tests
+        if: ${{ env.SWARMAP_RUN_INTEGRATION == '1' }}
+        run: |
+          source /opt/ros/humble/setup.bash
+          cd Swarmap
+          source install/setup.bash
+          colcon test --packages-select swarmap_bringup \
+              --event-handlers console_direct+
           colcon test-result --verbose
 
   # ── Node.js 20 dashboard build ────────────────────────────────────────────
