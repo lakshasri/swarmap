@@ -80,6 +80,7 @@ ament_python_install_package(${PROJECT_NAME})
 install(PROGRAMS
   src/world_sim_node.py
   src/swarm_monitor_node.py
+  src/dashboard_bridge_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

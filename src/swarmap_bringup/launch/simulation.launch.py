@@ -71,6 +71,13 @@ def launch_world_and_swarm(context, *_args, **_kwargs):
             parameters=[params_path, common],
             output='screen',
         ),
+        Node(
+            package='swarmap_core',
+            executable='dashboard_bridge_node.py',
+            name='dashboard_bridge_node',
+            parameters=[params_path, common],
+            output='screen',
+        ),
     ]
 
     for i in range(n):

@@ -50,10 +50,8 @@ yarn.lock
 venv/
 env/
 
-# Project planning (internal use only)
-plans/
-
 # Temporary files
 *.tmp
 *.temp
 .cache/
+octave-workspace
