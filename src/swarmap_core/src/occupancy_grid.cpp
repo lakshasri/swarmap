@@ -1,6 +1,7 @@
 #include "swarmap_core/occupancy_grid.hpp"
 #include <algorithm>
 #include <stdexcept>
+#include <cmath>
 
 namespace swarmap {
 
@@ -16,10 +17,8 @@ void OccupancyGrid::updateCell(int gx, int gy, float log_odds_update)
     if (!inBounds(gx, gy)) return;
     Cell &c = cells_[idx(gx, gy)];
     c.log_odds = std::clamp(c.log_odds + log_odds_update, LOG_ODDS_MIN, LOG_ODDS_MAX);
-
-    
     float p = 1.0f / (1.0f + std::exp(-c.log_odds));
-    c.confidence = std::abs(p - 0.5f) * 2.0f;   
+    c.confidence = std::abs(p - 0.5f) * 2.0f;
     c.dirty = true;
 }
 
@@ -27,11 +26,12 @@ int8_t OccupancyGrid::getCellRos(int gx, int gy) const
 {
     if (!inBounds(gx, gy)) return CELL_UNKNOWN;
     float lo = cells_[idx(gx, gy)].log_odds;
-    if (lo == 0.0f) return CELL_UNKNOWN;
+    // FIX #1: use threshold instead of exact float equality
+    if (std::abs(lo) < 0.01f) return CELL_UNKNOWN;
     float p = 1.0f / (1.0f + std::exp(-lo));
-    if (p > 0.6f) return CELL_OCCUPIED;
-    if (p < 0.4f) return CELL_FREE;
-    return CELL_UNKNOWN;   
+    if (p > 0.75f) return CELL_OCCUPIED;
+    if (p < 0.35f) return CELL_FREE;
+    return CELL_UNKNOWN;
 }
 
 float OccupancyGrid::getCellConfidence(int gx, int gy) const
@@ -52,10 +52,11 @@ void OccupancyGrid::clearDirty(int gx, int gy)
     cells_[idx(gx, gy)].dirty = false;
 }
 
+// FIX #2: use floor() instead of truncation for correct negative coords
 bool OccupancyGrid::worldToGrid(float wx, float wy, int &gx, int &gy) const
 {
-    gx = static_cast<int>((wx - origin_x_) / resolution_);
-    gy = static_cast<int>((wy - origin_y_) / resolution_);
+    gx = static_cast<int>(std::floor((wx - origin_x_) / resolution_));
+    gy = static_cast<int>(std::floor((wy - origin_y_) / resolution_));
     return inBounds(gx, gy);
 }
 
@@ -74,7 +75,7 @@ int OccupancyGrid::mappedCellCount() const
 {
     int count = 0;
     for (const auto &c : cells_)
-        if (c.log_odds != 0.0f) ++count;
+        if (std::abs(c.log_odds) >= 0.01f) ++count;
     return count;
 }
 
