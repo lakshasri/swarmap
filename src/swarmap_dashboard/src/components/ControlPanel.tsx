@@ -1,20 +1,10 @@
 import React, { useState, useMemo } from 'react'
 import ROSLIB from 'roslib'
 import { useRosTopic } from '../hooks/useRosBridge'
+import { robotColor } from '../colors'
 
 interface Props {
   ros: ROSLIB.Ros | null
-}
-
-interface SliderDef {
-  label: string
-  param: string
-  min: number
-  max: number
-  step: number
-  defaultVal: number
-  unit: string
-  note?: string
 }
 
 interface RobotRow {
@@ -26,66 +16,98 @@ interface Stats {
   robots: RobotRow[]
 }
 
-const SLIDERS: SliderDef[] = [
-  { label: 'Noise level',  param: 'noise_level',   min: 0, max: 1,   step: 0.05, defaultVal: 0,   unit: '' },
-  { label: 'Failure rate', param: 'failure_rate',  min: 0, max: 0.45, step: 0.01, defaultVal: 0,   unit: '/min' },
-]
 
-const FAILURE_MODES = ['random', 'progressive', 'cascade']
-
-const s: Record<string, React.CSSProperties> = {
-  root: { padding: 12, display: 'flex', flexDirection: 'column', gap: 12 },
-  heading: { fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: 1 },
+const s: Record<string, any> = {
+  root: { display: 'flex', flexDirection: 'column' },
   section: {
-    background: 'var(--bg-card)',
-    border: '1px solid var(--border)',
-    borderRadius: 8,
-    padding: 10,
+    padding: '16px 18px',
+    borderBottom: '1px solid var(--border)',
     display: 'flex',
     flexDirection: 'column',
     gap: 10,
   },
-  sliderRow: { display: 'flex', flexDirection: 'column', gap: 3 },
-  sliderLabel: { display: 'flex', justifyContent: 'space-between', fontSize: 12 },
-  slider: { width: '100%', accentColor: 'var(--accent)' },
-  btn: (variant: 'primary' | 'danger' | 'success' | 'default'): React.CSSProperties => ({
-    flex: 1,
-    padding: '8px 0',
-    borderRadius: 6,
-    border: 'none',
-    cursor: 'pointer',
-    fontSize: 13,
-    fontWeight: 700,
-    background:
-      variant === 'primary' ? 'var(--accent)' :
-      variant === 'danger'  ? 'var(--danger)' :
-      variant === 'success' ? 'var(--success)' :
-                              'var(--bg-secondary)',
-    color: '#fff',
-  }),
-  select: {
-    flex: 1,
-    padding: '7px 8px',
-    background: 'var(--bg-secondary)',
-    color: 'var(--text-primary)',
-    border: '1px solid var(--border)',
-    borderRadius: 6,
-    fontSize: 12,
-  },
-  row: { display: 'flex', gap: 8, alignItems: 'center' },
-  count: {
-    fontSize: 28,
-    fontWeight: 700,
-    color: 'var(--accent)',
-    textAlign: 'center' as const,
+  heading: {
+    fontSize: 10,
+    fontWeight: 600,
+    letterSpacing: 1.8,
+    color: 'var(--text-mute)',
     fontFamily: 'var(--font-mono)',
   },
-  countLabel: { fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' as const },
-  feedback: (ok: boolean): React.CSSProperties => ({
+  count: {
+    fontSize: 44,
+    fontWeight: 200,
+    color: 'var(--text)',
+    fontFamily: 'var(--font-mono)',
+    lineHeight: 1,
+  },
+  countLabel: {
+    fontSize: 10,
+    color: 'var(--text-mute)',
+    letterSpacing: 1,
+    fontFamily: 'var(--font-mono)',
+  },
+  spawnBtn: {
+    width: '100%',
+    padding: '10px 12px',
+    fontSize: 12,
+    letterSpacing: 1.5,
+    fontWeight: 600,
+    background: 'var(--text)',
+    color: 'var(--bg)',
+    border: '1px solid var(--text)',
+  },
+  killBtn: {
+    width: '100%',
+    padding: '8px 12px',
     fontSize: 11,
-    color: ok ? 'var(--success)' : 'var(--danger)',
-    textAlign: 'center' as const,
+    letterSpacing: 1.2,
+  },
+  select: { width: '100%' },
+  sliderRow: { display: 'flex', flexDirection: 'column', gap: 6 },
+  sliderLabel: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    fontSize: 11,
+    letterSpacing: 1,
+    color: 'var(--text-dim)',
+    fontFamily: 'var(--font-mono)',
+  },
+  sliderValue: { color: 'var(--text)', fontWeight: 600 },
+  robotList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2,
+    maxHeight: 160,
+    overflowY: 'auto',
+    border: '1px solid var(--border)',
+  },
+  robotItem: (selected: boolean): React.CSSProperties => ({
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '6px 10px',
+    fontSize: 11,
+    fontFamily: 'var(--font-mono)',
+    cursor: 'pointer',
+    background: selected ? 'var(--border)' : 'transparent',
+    borderLeft: selected ? '2px solid var(--text)' : '2px solid transparent',
   }),
+  dot: (col: string): React.CSSProperties => ({
+    width: 8,
+    height: 8,
+    borderRadius: '50%',
+    background: col,
+    flexShrink: 0,
+  }),
+  feedback: {
+    fontSize: 10,
+    color: 'var(--text-mute)',
+    letterSpacing: 1,
+    fontFamily: 'var(--font-mono)',
+    minHeight: 14,
+    textAlign: 'center',
+    padding: '10px 18px',
+  },
 }
 
 function publishString(ros: ROSLIB.Ros, topicName: string, data: string) {
@@ -94,12 +116,9 @@ function publishString(ros: ROSLIB.Ros, topicName: string, data: string) {
 }
 
 export default function ControlPanel({ ros }: Props) {
-  const [values, setValues] = useState<Record<string, number>>(
-    Object.fromEntries(SLIDERS.map(sl => [sl.param, sl.defaultVal]))
-  )
-  const [failureMode, setFailureMode] = useState('random')
   const [killTarget, setKillTarget]   = useState('')
-  const [feedback, setFeedback]       = useState<{ msg: string; ok: boolean } | null>(null)
+  const [feedback, setFeedback]       = useState('')
+  const [paused, setPaused]           = useState(false)
 
   const raw = useRosTopic<{ data: string }>(ros, '/dashboard/stats', 'std_msgs/String')
   const robots: RobotRow[] = useMemo(() => {
@@ -108,109 +127,106 @@ export default function ControlPanel({ ros }: Props) {
   }, [raw])
   const activeRobots = robots.filter(r => r.state !== 'FAILED')
 
-  const flash = (msg: string, ok = true) => {
-    setFeedback({ msg, ok })
-    setTimeout(() => setFeedback(null), 2500)
+  const flash = (msg: string) => {
+    setFeedback(msg)
+    setTimeout(() => setFeedback(''), 2000)
   }
 
-  const sendParam = (param: string, value: number | string) => {
+  const spawnRobot = () => {
     if (!ros) return
-    publishString(ros, '/swarm/set_param_request',
-      JSON.stringify({ param, value }))
-    flash(`${param} = ${value}`)
+    publishString(ros, '/swarm/spawn_robot_request', '')
+    flash('SPAWNING…')
   }
 
   const killRobot = () => {
     if (!ros || !killTarget) return
-    publishString(ros, '/swarm/kill_robot', killTarget)
-    flash(`Killed ${killTarget}`)
+    publishString(ros, '/swarm/kill_robot_request', killTarget)
+    flash(`KILLED ${killTarget.replace('robot_', 'R').toUpperCase()}`)
     setKillTarget('')
   }
 
-  const injectFailureNow = () => {
+  const pauseSim = () => {
     if (!ros) return
-    publishString(ros, '/swarm/inject_failure_now', '')
-    flash('Failure injected')
+    publishString(ros, '/swarm/pause_request', '')
+    setPaused(true); flash('PAUSED')
+  }
+  const resumeSim = () => {
+    if (!ros) return
+    publishString(ros, '/swarm/resume_request', '')
+    setPaused(false); flash('RESUMED')
+  }
+  const stopSim = () => {
+    if (!ros) return
+    publishString(ros, '/swarm/stop_request', '')
+    setPaused(true); flash('STOPPED')
+  }
+
+  const resetMap = () => {
+    if (!ros) return
+    publishString(ros, '/swarm/reset_map_request', '')
+    flash('MAP RESET — rescanning')
   }
 
   return (
     <div style={s.root}>
 
-      <div style={s.heading}>ROBOT STATUS</div>
       <div style={s.section}>
-        <div style={s.count}>{activeRobots.length}</div>
-        <div style={s.countLabel}>robots active</div>
+        <div style={s.heading}>SWARM</div>
+        <div style={s.count}>{String(activeRobots.length).padStart(2, '0')}</div>
+        <div style={s.countLabel}>ACTIVE ROBOTS</div>
+      </div>
 
-        <div style={s.row}>
-          <select
-            style={s.select}
-            value={killTarget}
-            onChange={e => setKillTarget(e.target.value)}
-          >
-            <option value=''>Select robot to kill…</option>
-            {activeRobots.map(r => (
-              <option key={r.id} value={r.id}>
-                {r.id}  [{r.state}]
-              </option>
-            ))}
-          </select>
-          <button
-            style={{ ...s.btn('danger'), flex: 'unset', padding: '8px 14px' }}
-            onClick={killRobot}
-            disabled={!killTarget}
-          >
-            Kill
-          </button>
+      <div style={s.section}>
+        <div style={s.heading}>SIMULATION</div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {paused ? (
+            <button style={{ ...s.spawnBtn, flex: 1, background: '#4ade80', color: '#000', border: '1px solid #4ade80' }} onClick={resumeSim}>RESUME</button>
+          ) : (
+            <button style={{ ...s.killBtn, flex: 1 }} onClick={pauseSim}>PAUSE</button>
+          )}
+          <button style={{ ...s.killBtn, flex: 1, color: '#ff5a3c', borderColor: '#ff5a3c' }} onClick={stopSim}>STOP</button>
         </div>
-
-        {feedback && <div style={s.feedback(feedback.ok)}>{feedback.msg}</div>}
-      </div>
-
-      <div style={s.heading}>LIVE PARAMETERS</div>
-      <div style={s.section}>
-        {SLIDERS.map(sl => (
-          <div key={sl.param} style={s.sliderRow}>
-            <div style={s.sliderLabel}>
-              <span>{sl.label}</span>
-              <span style={{ color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>
-                {values[sl.param]}{sl.unit}
-              </span>
-            </div>
-            <input
-              type="range"
-              style={s.slider}
-              min={sl.min}
-              max={sl.max}
-              step={sl.step}
-              value={values[sl.param]}
-              onChange={e => setValues(v => ({ ...v, [sl.param]: parseFloat(e.target.value) }))}
-              onMouseUp={() => sendParam(sl.param, values[sl.param])}
-              onTouchEnd={() => sendParam(sl.param, values[sl.param])}
-            />
-          </div>
-        ))}
-      </div>
-
-      <div style={s.heading}>FAILURE MODE</div>
-      <div style={s.section}>
-        <select
-          style={{ ...s.select, flex: 'unset' }}
-          value={failureMode}
-          onChange={e => {
-            setFailureMode(e.target.value)
-            sendParam('failure_mode', e.target.value)
-          }}
-        >
-          {FAILURE_MODES.map(m => (
-            <option key={m} value={m}>{m}</option>
-          ))}
-        </select>
-        <button style={{ ...s.btn('danger'), flex: 'unset', width: '100%' }}
-          onClick={injectFailureNow}>
-          Inject Failure Now
+        <button style={{ ...s.killBtn, width: '100%', color: '#ffa500', borderColor: '#ffa500' }} onClick={resetMap}>
+          RESET MAP
         </button>
       </div>
 
+      <div style={s.section}>
+        <div style={s.heading}>SPAWN / KILL</div>
+        <button style={s.spawnBtn} onClick={spawnRobot} disabled={!ros}>
+          + SPAWN ROBOT
+        </button>
+
+        <div style={{ ...s.heading, marginTop: 4 }}>ACTIVE</div>
+        <div style={s.robotList}>
+          {activeRobots.length === 0 && (
+            <div style={{ padding: '10px', fontSize: 10, color: 'var(--text-mute)', fontFamily: 'var(--font-mono)' }}>
+              NO ROBOTS
+            </div>
+          )}
+          {activeRobots.map(r => (
+            <div
+              key={r.id}
+              style={s.robotItem(killTarget === r.id)}
+              onClick={() => setKillTarget(killTarget === r.id ? '' : r.id)}
+            >
+              <span style={s.dot(robotColor(r.id))} />
+              <span style={{ color: 'var(--text)' }}>
+                {r.id.replace('robot_', 'R').toUpperCase()}
+              </span>
+              <span style={{ marginLeft: 'auto', color: 'var(--text-mute)', fontSize: 9, letterSpacing: 0.8 }}>
+                {r.state}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        <button style={s.killBtn} onClick={killRobot} disabled={!killTarget}>
+          KILL {killTarget ? killTarget.replace('robot_', 'R').toUpperCase() : 'SELECTED'}
+        </button>
+      </div>
+
+      <div style={s.feedback}>{feedback || ' '}</div>
     </div>
   )
 }
