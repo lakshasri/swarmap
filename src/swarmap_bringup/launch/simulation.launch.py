@@ -75,7 +75,7 @@ def launch_world_and_swarm(context, *_args, **_kwargs):
             package='swarmap_core',
             executable='dashboard_bridge_node.py',
             name='dashboard_bridge_node',
-            parameters=[params_path, common],
+            parameters=[params_path, common, {'params_file': params_path}],
             output='screen',
         ),
     ]
