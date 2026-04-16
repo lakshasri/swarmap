@@ -9,6 +9,7 @@ from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import LaserScan
+from std_msgs.msg import String
 from tf2_ros import TransformBroadcaster, StaticTransformBroadcaster
 
 FREE = 0
@@ -47,10 +48,10 @@ class WorldSim(Node):
         self.declare_parameter('noise_level', 0.0)
         self.declare_parameter('scan_rays', 180)
         self.declare_parameter('tick_hz', 10.0)
-        self.declare_parameter('linear_speed_cap', 0.6)
-        self.declare_parameter('angular_speed_cap', 1.5)
+        self.declare_parameter('linear_speed_cap', 0.8)
+        self.declare_parameter('angular_speed_cap', 2.0)
 
-        self.n = int(self.get_parameter('num_robots').value)
+        self.n_initial = int(self.get_parameter('num_robots').value)
         self.res = float(self.get_parameter('map_resolution').value)
         self.width_m = float(self.get_parameter('map_width_m').value)
         self.height_m = float(self.get_parameter('map_height_m').value)
@@ -65,29 +66,30 @@ class WorldSim(Node):
         self.h_cells = int(self.height_m / self.res)
         self.grid = build_world(self.w_cells, self.h_cells)
 
-        self.poses = []
-        self.cmds = []
-        spacing = self.width_m / (self.n + 1)
-        for i in range(self.n):
-            x = spacing * (i + 1)
-            y = self.height_m * 0.5
-            self.poses.append([x, y, 0.0])
-            self.cmds.append([0.0, 0.0])
-
-        qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
-        self.scan_pubs = []
-        self.odom_pubs = []
-        self.cmd_subs = []
-        for i in range(self.n):
-            ns = f'/robot_{i}'
-            self.scan_pubs.append(self.create_publisher(LaserScan, f'{ns}/scan', qos))
-            self.odom_pubs.append(self.create_publisher(Odometry, f'{ns}/odom', qos))
-            self.cmd_subs.append(self.create_subscription(
-                Twist, f'{ns}/cmd_vel', self._make_cmd_cb(i), qos))
-
+        self.qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
         self.tf_bcast = TransformBroadcaster(self)
         self.static_tf = StaticTransformBroadcaster(self)
-        self._publish_static_tfs()
+
+        self.robots: dict[str, dict] = {}
+        self._static_tf_msgs: list[TransformStamped] = []
+
+        spacing = self.width_m / (self.n_initial + 1)
+        for i in range(self.n_initial):
+            x = spacing * (i + 1)
+            y = self.height_m * 0.5
+            self._add_robot(f'robot_{i}', x, y)
+        self._republish_static_tfs()
+
+        self.create_subscription(String, '/swarm/spawn_robot',
+                                 self._on_spawn, 10)
+        self.create_subscription(String, '/swarm/kill_robot',
+                                 self._on_kill, 10)
+        # Init flag FIRST so subscription callbacks don't race
+        self.paused = False
+        self.create_subscription(String, '/swarm/pause',
+                                 lambda _: self._set_paused(True), 10)
+        self.create_subscription(String, '/swarm/resume',
+                                 lambda _: self._set_paused(False), 10)
 
         self.gt_pub = self.create_publisher(OccupancyGrid, '/world/ground_truth', 1)
         self.gt_timer = self.create_timer(2.0, self._publish_ground_truth)
@@ -96,31 +98,101 @@ class WorldSim(Node):
         self.timer = self.create_timer(self.dt, self.tick)
 
         self.get_logger().info(
-            f'world_sim_node: {self.n} robots in '
+            f'world_sim_node: {self.n_initial} robots in '
             f'{self.width_m:.1f}x{self.height_m:.1f} m world '
             f'({self.w_cells}x{self.h_cells} cells), {self.rays} rays')
 
-    def _make_cmd_cb(self, idx: int):
+    def _add_robot(self, rid: str, x: float, y: float):
+        if rid in self.robots:
+            return
+        ns = f'/{rid}'
+        r = {
+            'pose': [x, y, 0.0],
+            'cmd':  [0.0, 0.0],
+            'scan_pub': self.create_publisher(LaserScan, f'{ns}/scan', self.qos),
+            'odom_pub': self.create_publisher(Odometry,  f'{ns}/odom', self.qos),
+        }
+        r['cmd_sub'] = self.create_subscription(
+            Twist, f'{ns}/cmd_vel', self._make_cmd_cb(rid), self.qos)
+        self.robots[rid] = r
+
+        t = TransformStamped()
+        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.frame_id = 'map'
+        t.child_frame_id = f'{rid}/odom'
+        t.transform.rotation.w = 1.0
+        self._static_tf_msgs.append(t)
+
+    def _republish_static_tfs(self):
+        if self._static_tf_msgs:
+            self.static_tf.sendTransform(self._static_tf_msgs)
+
+    def _on_spawn(self, msg: String):
+        rid = msg.data.strip()
+        if not rid or rid in self.robots:
+            return
+        x, y = self._find_free_spawn()
+        self._add_robot(rid, x, y)
+        self._republish_static_tfs()
+        self.get_logger().info(f'world: spawned {rid} at ({x:.1f}, {y:.1f})')
+
+    def _find_free_spawn(self) -> tuple[float, float]:
+        cx = self.width_m * 0.5
+        cy = self.height_m * 0.5
+        clearance = 0.5
+        for r_step in range(0, 60):
+            radius = r_step * clearance
+            for k in range(max(1, r_step * 6)):
+                ang = (k / max(1, r_step * 6)) * 2.0 * math.pi
+                x = cx + radius * math.cos(ang)
+                y = cy + radius * math.sin(ang)
+                if x < 1.0 or x > self.width_m - 1.0:
+                    continue
+                if y < 1.0 or y > self.height_m - 1.0:
+                    continue
+                gx, gy = self._world_to_grid(x, y)
+                if self._cell_occupied(gx, gy):
+                    continue
+                if self._too_close_to_other_robots(x, y, clearance):
+                    continue
+                return x, y
+        # FIX #15: fallback scans wider to avoid spawning inside a wall
+        for _ in range(200):
+            x = random.uniform(2.0, self.width_m - 2.0)
+            y = random.uniform(2.0, self.height_m - 2.0)
+            gx, gy = self._world_to_grid(x, y)
+            if not self._cell_occupied(gx, gy):
+                return x, y
+        self.get_logger().warning('spawn: could not find free cell, using center')
+        return cx, cy
+
+    def _too_close_to_other_robots(self, x: float, y: float, min_d: float) -> bool:
+        for r in self.robots.values():
+            ox, oy, _ = r['pose']
+            if (ox - x) ** 2 + (oy - y) ** 2 < min_d * min_d:
+                return True
+        return False
+
+    def _on_kill(self, msg: String):
+        rid = msg.data.strip()
+        r = self.robots.pop(rid, None)
+        if r is None:
+            return
+        self.destroy_subscription(r['cmd_sub'])
+        self.destroy_publisher(r['scan_pub'])
+        self.destroy_publisher(r['odom_pub'])
+        self.get_logger().info(f'world: removed {rid}')
+
+    def _make_cmd_cb(self, rid: str):
         def cb(msg: Twist):
+            r = self.robots.get(rid)
+            if not r:
+                return
             v = max(-self.v_cap, min(self.v_cap, msg.linear.x))
             w = max(-self.w_cap, min(self.w_cap, msg.angular.z))
-            self.cmds[idx][0] = v
-            self.cmds[idx][1] = w
+            r['cmd'][0] = v
+            r['cmd'][1] = w
         return cb
-
-    def _publish_static_tfs(self):
-        now = self.get_clock().now().to_msg()
-        msgs = []
-        for i in range(self.n):
-            t = TransformStamped()
-            t.header.stamp = now
-            t.header.frame_id = 'map'
-            t.child_frame_id = f'robot_{i}/odom'
-            t.transform.translation.x = 0.0
-            t.transform.translation.y = 0.0
-            t.transform.rotation.w = 1.0
-            msgs.append(t)
-        self.static_tf.sendTransform(msgs)
 
     def _publish_ground_truth(self):
         msg = OccupancyGrid()
@@ -136,9 +208,8 @@ class WorldSim(Node):
         self.gt_pub.publish(msg)
 
     def _world_to_grid(self, x: float, y: float):
-        gx = int(x / self.res)
-        gy = int(y / self.res)
-        return gx, gy
+        # FIX #24: use floor instead of int() truncation
+        return int(math.floor(x / self.res)), int(math.floor(y / self.res))
 
     def _cell_occupied(self, gx: int, gy: int) -> bool:
         if gx < 0 or gy < 0 or gx >= self.w_cells or gy >= self.h_cells:
@@ -157,11 +228,17 @@ class WorldSim(Node):
                 return d
         return self.range_max
 
+    def _set_paused(self, val: bool):
+        self.paused = val
+        self.get_logger().info(f'world: {"PAUSED" if val else "RESUMED"}')
+
     def tick(self):
+        if self.paused:
+            return
         now = self.get_clock().now().to_msg()
-        for i in range(self.n):
-            v, w = self.cmds[i]
-            x, y, th = self.poses[i]
+        for rid, r in list(self.robots.items()):
+            v, w = r['cmd']
+            x, y, th = r['pose']
 
             nx = x + v * math.cos(th) * self.dt
             ny = y + v * math.sin(th) * self.dt
@@ -171,40 +248,40 @@ class WorldSim(Node):
             if not self._cell_occupied(ngx, ngy):
                 x, y = nx, ny
             th = (nth + math.pi) % (2 * math.pi) - math.pi
-            self.poses[i] = [x, y, th]
+            r['pose'] = [x, y, th]
 
-            self._publish_odom(i, x, y, th, v, w, now)
-            self._publish_tf(i, x, y, th, now)
-            self._publish_scan(i, x, y, th, now)
+            self._publish_odom(rid, r, x, y, th, v, w, now)
+            self._publish_tf(rid, x, y, th, now)
+            self._publish_scan(rid, r, x, y, th, now)
 
-    def _publish_odom(self, i, x, y, th, v, w, stamp):
+    def _publish_odom(self, rid, r, x, y, th, v, w, stamp):
         msg = Odometry()
         msg.header.stamp = stamp
-        msg.header.frame_id = f'robot_{i}/odom'
-        msg.child_frame_id = f'robot_{i}/base_link'
+        msg.header.frame_id = f'{rid}/odom'
+        msg.child_frame_id = f'{rid}/base_link'
         msg.pose.pose.position.x = x
         msg.pose.pose.position.y = y
         msg.pose.pose.orientation.z = math.sin(th * 0.5)
         msg.pose.pose.orientation.w = math.cos(th * 0.5)
         msg.twist.twist.linear.x = v
         msg.twist.twist.angular.z = w
-        self.odom_pubs[i].publish(msg)
+        r['odom_pub'].publish(msg)
 
-    def _publish_tf(self, i, x, y, th, stamp):
+    def _publish_tf(self, rid, x, y, th, stamp):
         t = TransformStamped()
         t.header.stamp = stamp
-        t.header.frame_id = f'robot_{i}/odom'
-        t.child_frame_id = f'robot_{i}/base_link'
+        t.header.frame_id = f'{rid}/odom'
+        t.child_frame_id = f'{rid}/base_link'
         t.transform.translation.x = x
         t.transform.translation.y = y
         t.transform.rotation.z = math.sin(th * 0.5)
         t.transform.rotation.w = math.cos(th * 0.5)
         self.tf_bcast.sendTransform(t)
 
-    def _publish_scan(self, i, x, y, th, stamp):
+    def _publish_scan(self, rid, r, x, y, th, stamp):
         scan = LaserScan()
         scan.header.stamp = stamp
-        scan.header.frame_id = f'robot_{i}/base_link'
+        scan.header.frame_id = f'{rid}/base_link'
         scan.angle_min = -math.pi
         scan.angle_max = math.pi
         scan.angle_increment = (2 * math.pi) / self.rays
@@ -213,13 +290,13 @@ class WorldSim(Node):
         ranges = []
         for k in range(self.rays):
             a = th + scan.angle_min + k * scan.angle_increment
-            r = self._raycast(x, y, a)
+            d = self._raycast(x, y, a)
             if self.noise > 0.0:
-                r += random.gauss(0.0, self.noise * self.range_max)
-                r = max(scan.range_min, min(scan.range_max, r))
-            ranges.append(float(r))
+                d += random.gauss(0.0, self.noise * self.range_max)
+                d = max(scan.range_min, min(scan.range_max, d))
+            ranges.append(float(d))
         scan.ranges = ranges
-        self.scan_pubs[i].publish(scan)
+        r['scan_pub'].publish(scan)
 
 
 def main():
