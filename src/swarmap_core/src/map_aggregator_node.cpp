@@ -5,6 +5,7 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "rclcpp/rclcpp.hpp"
@@ -84,22 +85,41 @@ public:
                         "/dashboard/events", qos_reliable);
         pub_markers_= create_publisher<visualization_msgs::msg::MarkerArray>(
                         "/swarm/frontier_markers", qos_best);
+        pub_robot_markers_ = create_publisher<visualization_msgs::msg::MarkerArray>(
+                        "/swarm/robot_markers", qos_best);
 
-        
+
+        qos_reliable_ = qos_reliable;
         for (int i = 0; i < n; ++i) {
-            const std::string id = "robot_" + std::to_string(i);
-            const std::string ns = "/" + id;
-
-            map_subs_.push_back(
-                create_subscription<swarmap_msgs::msg::PartialMap>(
-                    ns + "/map", qos_reliable,
-                    [this](swarmap_msgs::msg::PartialMap::SharedPtr m){ onPartialMap(m); }));
-
-            status_subs_.push_back(
-                create_subscription<swarmap_msgs::msg::RobotStatus>(
-                    ns + "/status", qos_reliable,
-                    [this](swarmap_msgs::msg::RobotStatus::SharedPtr m){ onRobotStatus(m); }));
+            subscribeRobot("robot_" + std::to_string(i));
         }
+
+        sub_spawn_ = create_subscription<std_msgs::msg::String>(
+            "/swarm/spawn_robot", 10,
+            [this](std_msgs::msg::String::SharedPtr m){
+                subscribeRobot(m->data);
+            });
+
+        sub_kill_ = create_subscription<std_msgs::msg::String>(
+            "/swarm/kill_robot", 10,
+            [this](std_msgs::msg::String::SharedPtr m){
+                std::lock_guard lock(robots_mutex_);
+                robots_.erase(m->data);
+                killed_ids_.insert(m->data);
+            });
+
+        sub_reset_ = create_subscription<std_msgs::msg::String>(
+            "/swarm/reset_map", 10,
+            [this](std_msgs::msg::String::SharedPtr){
+                std::lock_guard glock(grid_mutex_);
+                std::lock_guard rlock(robots_mutex_);
+                size_t N = global_map_.data.size();
+                std::fill(global_map_.data.begin(), global_map_.data.end(), -1);
+                std::fill(cell_prob_sum_.begin(), cell_prob_sum_.end(), 0.0f);
+                std::fill(cell_conf_sum_.begin(), cell_conf_sum_.end(), 0.0f);
+                std::fill(visit_counts_.begin(), visit_counts_.end(), 0);
+                RCLCPP_WARN(get_logger(), "Global map RESET — %zu cells cleared", N);
+            });
 
         double rate_ms = 1000.0 / get_parameter("publish_rate_hz").as_double();
         timer_ = create_wall_timer(
@@ -127,11 +147,37 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr          pub_stats_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr          pub_events_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_markers_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_robot_markers_;
 
     std::vector<rclcpp::Subscription<swarmap_msgs::msg::PartialMap>::SharedPtr>  map_subs_;
     std::vector<rclcpp::Subscription<swarmap_msgs::msg::RobotStatus>::SharedPtr> status_subs_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_spawn_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_kill_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_reset_;
+    std::unordered_set<std::string> subscribed_ids_;
+    std::unordered_set<std::string> killed_ids_;
+    rclcpp::QoS qos_reliable_ = rclcpp::QoS(10).reliable();
 
     rclcpp::TimerBase::SharedPtr timer_;
+
+    void subscribeRobot(const std::string &id)
+    {
+        if (id.empty() || subscribed_ids_.count(id)) return;
+        subscribed_ids_.insert(id);
+        const std::string ns = "/" + id;
+
+        map_subs_.push_back(
+            create_subscription<swarmap_msgs::msg::PartialMap>(
+                ns + "/map", qos_reliable_,
+                [this](swarmap_msgs::msg::PartialMap::SharedPtr m){ onPartialMap(m); }));
+
+        status_subs_.push_back(
+            create_subscription<swarmap_msgs::msg::RobotStatus>(
+                ns + "/status", qos_reliable_,
+                [this](swarmap_msgs::msg::RobotStatus::SharedPtr m){ onRobotStatus(m); }));
+
+        RCLCPP_INFO(get_logger(), "MapAggregator subscribed to %s", id.c_str());
+    }
 
     
     void onPartialMap(const swarmap_msgs::msg::PartialMap::SharedPtr &msg)
@@ -165,6 +211,7 @@ private:
     void onRobotStatus(const swarmap_msgs::msg::RobotStatus::SharedPtr &msg)
     {
         std::lock_guard lock(robots_mutex_);
+        if (killed_ids_.count(msg->robot_id)) return;
         auto &r       = robots_[msg->robot_id];
         r.id          = msg->robot_id;
         r.is_active   = msg->is_active;
@@ -183,6 +230,7 @@ private:
         publishStats();
         pub_map_->publish(global_map_);
         publishConfidenceMap();
+        publishRobotMarkers();
     }
 
     void rebuildGlobalMap()
@@ -249,9 +297,91 @@ private:
         std::lock_guard lock(grid_mutex_);
         for (size_t i = 0; i < N; ++i) {
             uint8_t v = visit_counts_[i];
-            cmap.data[i] = (v == 0) ? -1 : static_cast<int8_t>(std::min<int>(v * 33, 100));
+            // FIX #5: prevent overflow — scale [0,255] to [0,100] safely
+            cmap.data[i] = (v == 0) ? -1 : static_cast<int8_t>(std::min<int>(static_cast<int>(v) * 100 / 255, 100));
         }
         pub_conf_->publish(cmap);
+    }
+
+    void publishRobotMarkers()
+    {
+        visualization_msgs::msg::MarkerArray ma;
+        std::lock_guard lock(robots_mutex_);
+
+        // FIX: Clear all old markers first so killed robots vanish from RViz
+        {
+            visualization_msgs::msg::Marker clear;
+            clear.header.frame_id = "map";
+            clear.header.stamp = get_clock()->now();
+            clear.ns = "";
+            clear.id = 0;
+            clear.action = visualization_msgs::msg::Marker::DELETEALL;
+            ma.markers.push_back(clear);
+        }
+        int id = 0;
+
+        // Dock markers (green cylinders)
+        float mw = static_cast<float>(get_parameter("map_width_m").as_double());
+        float mh = static_cast<float>(get_parameter("map_height_m").as_double());
+        float docks[][2] = {{mw*0.50f, mh*0.50f},
+                            {mw*0.25f, mh*0.25f}, {mw*0.75f, mh*0.25f},
+                            {mw*0.25f, mh*0.75f}, {mw*0.75f, mh*0.75f}};
+        for (int i = 0; i < 5; ++i) {
+            visualization_msgs::msg::Marker m;
+            m.header.frame_id = "map";
+            m.header.stamp = get_clock()->now();
+            m.ns = "docks"; m.id = id++;
+            m.type = visualization_msgs::msg::Marker::CYLINDER;
+            m.action = visualization_msgs::msg::Marker::ADD;
+            m.pose.position.x = docks[i][0];
+            m.pose.position.y = docks[i][1];
+            m.pose.position.z = 0.1;
+            m.pose.orientation.w = 1.0;
+            m.scale.x = 1.0; m.scale.y = 1.0; m.scale.z = 0.2;
+            m.color.r = 0.0; m.color.g = 0.8; m.color.b = 0.4; m.color.a = 0.6;
+            ma.markers.push_back(m);
+        }
+
+        // Robot body markers (colored spheres)
+        static const float palette[][3] = {
+            {0.0f,0.83f,1.0f}, {1.0f,0.3f,0.82f}, {1.0f,0.85f,0.3f}, {0.3f,1.0f,0.53f},
+            {1.0f,0.58f,0.3f}, {0.72f,0.42f,1.0f}, {1.0f,0.31f,0.31f}, {0.83f,1.0f,0.3f},
+        };
+        int ri = 0;
+        for (auto &[rid, r] : robots_) {
+            visualization_msgs::msg::Marker m;
+            m.header.frame_id = "map";
+            m.header.stamp = get_clock()->now();
+            m.ns = "robots"; m.id = id++;
+            m.type = visualization_msgs::msg::Marker::SPHERE;
+            m.action = visualization_msgs::msg::Marker::ADD;
+            m.pose.position.x = r.x;
+            m.pose.position.y = r.y;
+            m.pose.position.z = 0.3;
+            m.pose.orientation.w = 1.0;
+            m.scale.x = 0.6; m.scale.y = 0.6; m.scale.z = 0.6;
+            int ci = ri % 8;
+            m.color.r = palette[ci][0]; m.color.g = palette[ci][1];
+            m.color.b = palette[ci][2]; m.color.a = r.is_active ? 1.0f : 0.3f;
+            ma.markers.push_back(m);
+
+            // Label
+            visualization_msgs::msg::Marker lbl;
+            lbl.header = m.header;
+            lbl.ns = "robot_labels"; lbl.id = id++;
+            lbl.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+            lbl.action = visualization_msgs::msg::Marker::ADD;
+            lbl.pose.position.x = r.x;
+            lbl.pose.position.y = r.y;
+            lbl.pose.position.z = 1.0;
+            lbl.pose.orientation.w = 1.0;
+            lbl.scale.z = 0.5;
+            lbl.color.r = 1.0; lbl.color.g = 1.0; lbl.color.b = 1.0; lbl.color.a = 1.0;
+            lbl.text = rid;
+            ma.markers.push_back(lbl);
+            ++ri;
+        }
+        pub_robot_markers_->publish(ma);
     }
 
     float computeCoverage() const
