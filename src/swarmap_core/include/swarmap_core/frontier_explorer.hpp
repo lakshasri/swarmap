@@ -46,6 +46,7 @@ public:
 
     
     void markVisited(float wx, float wy);
+    void clearVisited() { visited_centroids_.clear(); neighbour_bids_.clear(); }
 
 private:
     float min_cluster_size_;
