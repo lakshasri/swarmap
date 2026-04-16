@@ -23,22 +23,10 @@ class SwarmMonitorNode(Node):
         self._pub_health = self.create_publisher(String, '/swarm/health', 10)
         self._pub_topo = self.create_publisher(String, '/dashboard/network_topology', 10)
 
+        self._status_subs: dict[str, object] = {}
+
         for i in range(n):
-            rid = f'robot_{i}'
-            self._robots[rid] = {
-                'last_seen': 0.0,
-                'state': 'UNKNOWN',
-                'battery': 1.0,
-                'neighbours': [],
-                'x': 0.0,
-                'y': 0.0,
-            }
-            self.create_subscription(
-                RobotStatus,
-                f'/{rid}/status',
-                self._make_status_cb(rid),
-                10,
-            )
+            self._track(f'robot_{i}')
 
         self.create_subscription(
             NeighbourDiscovery,
@@ -47,8 +35,52 @@ class SwarmMonitorNode(Node):
             10,
         )
 
+        self.create_subscription(
+            String,
+            '/swarm/spawn_robot',
+            lambda m: self._track(m.data),
+            10,
+        )
+
+        self.create_subscription(
+            String,
+            '/swarm/kill_robot',
+            lambda m: self._drop(m.data),
+            10,
+        )
+
         self.create_timer(1.0, self._publish_all)
         self.get_logger().info(f'SwarmMonitor tracking {n} robots')
+
+    def _track(self, rid: str):
+        rid = (rid or '').strip()
+        if not rid or rid in self._status_subs:
+            return
+        self._robots.setdefault(rid, {
+            'last_seen': 0.0,
+            'state': 'UNKNOWN',
+            'battery': 1.0,
+            'neighbours': [],
+            'x': 0.0,
+            'y': 0.0,
+        })
+        self._status_subs[rid] = self.create_subscription(
+            RobotStatus,
+            f'/{rid}/status',
+            self._make_status_cb(rid),
+            10,
+        )
+        self.get_logger().info(f'SwarmMonitor tracking {rid}')
+
+    def _drop(self, rid: str):
+        rid = (rid or '').strip()
+        if not rid:
+            return
+        sub = self._status_subs.pop(rid, None)
+        if sub is not None:
+            self.destroy_subscription(sub)
+        self._robots.pop(rid, None)
+        self.get_logger().info(f'SwarmMonitor dropped {rid}')
 
     def _make_status_cb(self, robot_id: str):
         def cb(msg: RobotStatus):
