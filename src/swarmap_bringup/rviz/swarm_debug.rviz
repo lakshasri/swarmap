@@ -113,6 +113,36 @@ Visualization Manager:
         Value: /swarm/frontier_markers
       Value: true
 
+    # ── Robot bodies + dock markers ─────────────────────────────────────────
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: RobotBodies
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /swarm/robot_markers
+      Value: true
+
+    # ── Ground truth map (world obstacles) ────────────────────────────────
+    - Class: rviz_default_plugins/Map
+      Alpha: 0.3
+      Color Scheme: map
+      Draw Behind: true
+      Enabled: true
+      Name: GroundTruth
+      Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /world/ground_truth
+      Use Timestamp: false
+      Value: true
+
     # ── Robot trajectory paths ─────────────────────────────────────────────
     - Class: rviz_default_plugins/Path
       Alpha: 1
@@ -193,20 +223,26 @@ Visualization Manager:
   Value: true
   Views:
     Current:
-      Class: rviz_default_plugins/TopDownOrtho
+      Class: rviz_default_plugins/Orbit
+      Distance: 60
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
+      Focal Point:
+        X: 25
+        Y: 25
+        Z: 0
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.05
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Scale: 15
+      Pitch: 0.7853981852531433
       Target Frame: <Fixed Frame>
-      Value: TopDownOrtho (rviz_default_plugins)
-      X: 0
-      Y: 0
+      Value: Orbit (rviz_default_plugins)
+      Yaw: 0.7853981852531433
     Saved: ~
 Window Geometry:
   Displays:
