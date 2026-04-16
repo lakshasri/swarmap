@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import ROSLIB from 'roslib'
 
 const WS_URL = 'ws://localhost:9090'
+const RECONNECT_DELAY_MS = 1500
 
 export interface RosBridgeState {
   ros: ROSLIB.Ros | null
@@ -13,29 +14,43 @@ export interface RosBridgeState {
 export function useRosBridge(): RosBridgeState {
   const [connected, setConnected] = useState(false)
   const [error, setError]         = useState<string | null>(null)
-  const rosRef = useRef<ROSLIB.Ros | null>(null)
+  const [ros, setRos]             = useState<ROSLIB.Ros | null>(null)
+  const cancelledRef               = useRef(false)
 
   useEffect(() => {
-    const ros = new ROSLIB.Ros({ url: WS_URL })
-    rosRef.current = ros
+    cancelledRef.current = false
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
-    ros.on('connection', () => {
-      setConnected(true)
-      setError(null)
-    })
-    ros.on('error', (e: Error) => {
-      setError(e.message ?? 'rosbridge error')
-    })
-    ros.on('close', () => {
-      setConnected(false)
-    })
+    const connect = () => {
+      if (cancelledRef.current) return
+      const instance = new ROSLIB.Ros({ url: WS_URL })
+      setRos(instance)
+
+      instance.on('connection', () => {
+        setConnected(true)
+        setError(null)
+      })
+      instance.on('error', (e: Error) => {
+        setError(e.message ?? 'rosbridge error')
+      })
+      instance.on('close', () => {
+        setConnected(false)
+        if (!cancelledRef.current) {
+          reconnectTimer = setTimeout(connect, RECONNECT_DELAY_MS)
+        }
+      })
+    }
+
+    connect()
 
     return () => {
-      ros.close()
+      cancelledRef.current = true
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      if (ros) ros.close()
     }
   }, [])
 
-  return { ros: rosRef.current, connected, error }
+  return { ros, connected, error }
 }
 
 export function useRosTopic<T>(
