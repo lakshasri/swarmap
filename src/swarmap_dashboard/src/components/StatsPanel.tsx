@@ -1,7 +1,8 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, useRef } from 'react'
 import ROSLIB from 'roslib'
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
+import { LineChart, Line, XAxis, YAxis, ResponsiveContainer } from 'recharts'
 import { useRosTopic } from '../hooks/useRosBridge'
+import { robotColor } from '../colors'
 
 interface RobotRow {
   id: string
@@ -21,136 +22,178 @@ interface Props {
   ros: ROSLIB.Ros | null
 }
 
-const s: Record<string, React.CSSProperties> = {
-  root: {
-    padding: 12,
+const s: Record<string, any> = {
+  root: { display: 'flex', flexDirection: 'column' },
+  section: {
+    padding: '16px 18px',
+    borderBottom: '1px solid var(--border)',
     display: 'flex',
     flexDirection: 'column',
-    gap: 16,
-    height: '100%',
-    overflow: 'auto',
+    gap: 10,
   },
-  section: {
-    background: 'var(--bg-card)',
-    borderRadius: 8,
-    padding: 12,
-    border: '1px solid var(--border)',
-  },
-  label: { fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 },
-  bigNum: { fontSize: 32, fontWeight: 700, color: 'var(--accent)' },
-  ring: (pct: number): React.CSSProperties => ({
-    width: 80,
-    height: 80,
-    borderRadius: '50%',
-    background: `conic-gradient(var(--accent) ${pct * 3.6}deg, var(--bg-secondary) 0deg)`,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: 14,
-    fontWeight: 700,
-    color: 'var(--text-primary)',
-  }),
-  row: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  battery: (lvl: number): React.CSSProperties => ({
-    width: 50,
-    height: 8,
-    borderRadius: 4,
-    background: `linear-gradient(to right,
-      ${lvl > 0.3 ? 'var(--success)' : 'var(--danger)'} ${lvl * 100}%,
-      var(--bg-secondary) 0%)`,
-    border: '1px solid var(--border)',
-  }),
-  stateChip: (state: string): React.CSSProperties => ({
+  heading: {
     fontSize: 10,
-    padding: '2px 6px',
-    borderRadius: 10,
-    background:
-      state === 'EXPLORING'  ? 'var(--accent)' :
-      state === 'NAVIGATING' ? '#6a5acd' :
-      state === 'RETURNING'  ? 'var(--warning)' :
-      state === 'FAILED'     ? 'var(--danger)' :
-                               'var(--bg-secondary)',
-    color: '#fff',
+    fontWeight: 600,
+    letterSpacing: 1.8,
+    color: 'var(--text-mute)',
+    fontFamily: 'var(--font-mono)',
+  },
+  bigPct: {
+    fontSize: 44,
+    fontWeight: 200,
+    color: 'var(--text)',
+    fontFamily: 'var(--font-mono)',
+    lineHeight: 1,
+  },
+  bar: {
+    height: 4,
+    background: 'var(--border)',
+    overflow: 'hidden',
+  },
+  barFill: (pct: number): React.CSSProperties => ({
+    height: '100%',
+    background: 'var(--text)',
+    width: `${Math.min(100, pct)}%`,
+    transition: 'width 0.4s ease',
   }),
+  twoCol: { display: 'flex', gap: 32 },
+  metric: { display: 'flex', flexDirection: 'column', gap: 4 },
+  metricNum: {
+    fontSize: 24,
+    fontFamily: 'var(--font-mono)',
+    color: 'var(--text)',
+    fontWeight: 300,
+  },
+  metricLabel: {
+    fontSize: 9,
+    color: 'var(--text-mute)',
+    letterSpacing: 1.2,
+    fontFamily: 'var(--font-mono)',
+  },
+  robotRow: {
+    display: 'grid',
+    gridTemplateColumns: '54px 1fr 60px',
+    alignItems: 'center',
+    gap: 10,
+    padding: '8px 0',
+    fontSize: 11,
+    fontFamily: 'var(--font-mono)',
+    borderBottom: '1px solid var(--border)',
+  },
+  robotIdWrap: { display: 'flex', alignItems: 'center', gap: 6 },
+  dot: (col: string): React.CSSProperties => ({
+    width: 8,
+    height: 8,
+    borderRadius: '50%',
+    background: col,
+    flexShrink: 0,
+  }),
+  state: { color: 'var(--text-dim)', fontSize: 10, letterSpacing: 0.8 },
+  battOuter: {
+    height: 6,
+    border: '1px solid var(--border-hi)',
+    width: 60,
+  },
+  battInner: (lvl: number): React.CSSProperties => ({
+    height: '100%',
+    background: lvl > 0.2 ? 'var(--text)' : '#888',
+    width: `${Math.max(0, Math.min(1, lvl)) * 100}%`,
+  }),
+  empty: {
+    color: 'var(--text-mute)',
+    fontSize: 11,
+    fontFamily: 'var(--font-mono)',
+    letterSpacing: 0.5,
+  },
 }
-
-const history: { t: number; cov: number }[] = []
 
 export default function StatsPanel({ ros }: Props) {
   const raw = useRosTopic<{ data: string }>(ros, '/dashboard/stats', 'std_msgs/String')
+  const historyRef = useRef<{ t: number; cov: number }[]>([])
 
   const stats: Stats | null = useMemo(() => {
     if (!raw?.data) return null
     try { return JSON.parse(raw.data) as Stats } catch { return null }
   }, [raw])
 
-  
   if (stats) {
-    history.push({ t: Date.now() / 1000, cov: stats.coverage_pct })
-    if (history.length > 120) history.shift()
+    historyRef.current.push({ t: Date.now() / 1000, cov: stats.coverage_pct })
+    if (historyRef.current.length > 120) historyRef.current.shift()
   }
 
-  const pct   = stats?.coverage_pct   ?? 0
-  const active= stats?.active_robots  ?? 0
-  const failed= stats?.failed_robots  ?? 0
-  const robots= stats?.robots         ?? []
+  const pct    = stats?.coverage_pct  ?? 0
+  const active = stats?.active_robots ?? 0
+  const failed = stats?.failed_robots ?? 0
+  const robots = stats?.robots ?? []
 
   return (
     <div style={s.root}>
 
-      {}
       <div style={s.section}>
-        <div style={s.label}>COVERAGE</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <div style={s.ring(pct)}>{pct.toFixed(1)}%</div>
-          <div>
-            <div style={{ color: 'var(--success)', fontSize: 13 }}>
-              {active} active
-            </div>
-            <div style={{ color: 'var(--danger)', fontSize: 13 }}>
-              {failed} failed
-            </div>
+        <div style={s.heading}>COVERAGE</div>
+        <div style={s.bigPct}>
+          {pct.toFixed(1)}
+          <span style={{ fontSize: 18, color: 'var(--text-mute)', marginLeft: 2 }}>%</span>
+        </div>
+        <div style={s.bar}><div style={s.barFill(pct)} /></div>
+      </div>
+
+      <div style={s.section}>
+        <div style={s.heading}>STATUS</div>
+        <div style={s.twoCol}>
+          <div style={s.metric}>
+            <div style={s.metricNum}>{String(active).padStart(2, '0')}</div>
+            <div style={s.metricLabel}>ACTIVE</div>
+          </div>
+          <div style={s.metric}>
+            <div style={s.metricNum}>{String(failed).padStart(2, '0')}</div>
+            <div style={s.metricLabel}>FAILED</div>
           </div>
         </div>
       </div>
 
-      {}
-      <div style={{ ...s.section, height: 120 }}>
-        <div style={s.label}>COVERAGE OVER TIME</div>
-        <ResponsiveContainer width="100%" height={88}>
-          <LineChart data={history}>
-            <XAxis dataKey="t" hide />
-            <YAxis domain={[0, 100]} hide />
-            <Tooltip formatter={(v: number) => `${v.toFixed(1)}%`} />
-            <Line type="monotone" dataKey="cov" stroke="var(--accent)" dot={false} />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-
-      {}
       <div style={s.section}>
-        <div style={s.label}>ROBOTS</div>
-        {robots.map((r) => (
-          <div key={r.id} style={s.row}>
-            <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)' }}>
-              {r.id}
-            </span>
-            <span style={s.stateChip(r.state)}>{r.state}</span>
-            <div style={s.battery(r.battery)} title={`${(r.battery * 100).toFixed(0)}%`} />
-          </div>
-        ))}
-        {robots.length === 0 && (
-          <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-            Waiting for robots…
-          </div>
-        )}
+        <div style={s.heading}>COVERAGE OVER TIME</div>
+        <div style={{ height: 70 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={historyRef.current}>
+              <XAxis dataKey="t" hide />
+              <YAxis domain={[0, 100]} hide />
+              <Line
+                type="monotone"
+                dataKey="cov"
+                stroke="#ffffff"
+                strokeWidth={1.5}
+                dot={false}
+                isAnimationActive={false}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
       </div>
 
+      <div style={s.section}>
+        <div style={s.heading}>ROBOTS</div>
+        {robots.length === 0 && <div style={s.empty}>NO DATA</div>}
+        {robots.map(r => {
+          const failed = r.state === 'FAILED'
+          const col = failed ? '#3a3a3a' : robotColor(r.id)
+          return (
+            <div key={r.id} style={s.robotRow}>
+              <span style={s.robotIdWrap}>
+                <span style={s.dot(col)} />
+                <span style={{ color: 'var(--text)' }}>
+                  {r.id.replace('robot_', 'R').toUpperCase()}
+                </span>
+              </span>
+              <span style={s.state}>{r.state}</span>
+              <div style={s.battOuter} title={`${(r.battery * 100).toFixed(0)}%`}>
+                <div style={s.battInner(r.battery)} />
+              </div>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
