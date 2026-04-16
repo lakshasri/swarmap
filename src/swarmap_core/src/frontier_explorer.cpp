@@ -160,8 +160,10 @@ bool FrontierExplorer::winsAuction(const std::string &own_id, float own_score,
         float d = std::hypot(rec.cx - cx, rec.cy - cy);
         if (d > tolerance) continue;
         
-        if (rec.bid_score < own_score) return false;
-        if (rec.bid_score == own_score && id < own_id) return false;  
+        // FIX #14: use epsilon for float comparison instead of exact equality
+        constexpr float EPS = 0.01f;
+        if (rec.bid_score < own_score - EPS) return false;
+        if (std::abs(rec.bid_score - own_score) < EPS && id < own_id) return false;  
     }
     return true;
 }
@@ -174,6 +176,8 @@ void FrontierExplorer::markVisited(float wx, float wy)
 float FrontierExplorer::antiRevisitPenalty(float wx, float wy) const
 {
     float penalty = 0.0f;
+    // FIX #21: guard against sigma=0 division
+    if (anti_revisit_sigma_ < 0.01f) return 0.0f;
     for (auto &[vx, vy] : visited_centroids_) {
         float d = std::hypot(wx - vx, wy - vy);
         penalty += anti_revisit_weight_ * std::exp(-d / anti_revisit_sigma_);
