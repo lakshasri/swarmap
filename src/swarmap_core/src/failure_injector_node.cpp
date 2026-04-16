@@ -96,11 +96,12 @@ private:
         if (active.empty()) return -1;
 
         if (failure_mode_ == "progressive") {
-            
-            int t = active.front();
-            return t;
+            return active.front();
         } else if (failure_mode_ == "cascade") {
-            
+            // FIX #7: true cascade — kill neighbor of last failed robot
+            if (cascade_next_ < static_cast<int>(active.size()))
+                return active[cascade_next_++];
+            cascade_next_ = 0;
             return active.front();
         } else {
             
