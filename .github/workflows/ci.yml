@@ -22,20 +22,17 @@ jobs:
       - name: Install rosdep dependencies
         run: |
           source /opt/ros/humble/setup.bash
-          cd Swarmap
           rosdep update
           rosdep install --from-paths src --ignore-src -r -y
 
       - name: Build workspace
         run: |
           source /opt/ros/humble/setup.bash
-          cd Swarmap
           colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
 
       - name: Run C++ unit tests
         run: |
           source /opt/ros/humble/setup.bash
-          cd Swarmap
           source install/setup.bash
           colcon test --packages-select swarmap_core swarmap_msgs
           colcon test-result --verbose
@@ -49,8 +46,8 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: Swarmap/src/swarmap_dashboard/package-lock.json
+          cache-dependency-path: src/swarmap_dashboard/package-lock.json
       - run: npm ci
-        working-directory: Swarmap/src/swarmap_dashboard
+        working-directory: src/swarmap_dashboard
       - run: npm run build
-        working-directory: Swarmap/src/swarmap_dashboard
+        working-directory: src/swarmap_dashboard

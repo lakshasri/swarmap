@@ -30,8 +30,6 @@ There is no Gazebo dependency.
 - **Python** — pure-ROS world simulator (`world_sim_node.py`) + swarm monitor
 - **RViz2** — primary visualisation
 - **React + Vite + rosbridge** — optional browser dashboard (`swarmap_dashboard`)
-- **MATLAB** — offline scaling + fault-tolerance benchmarks (`matlab/`)
-
 There is no Gazebo.
 
 ## Quick start
@@ -75,15 +73,11 @@ ros2 launch swarmap_bringup demo_fault_tolerance.launch.py
 
 ## Benchmarks
 
-Scaling and fault tolerance are evaluated in MATLAB, headless and fast:
+Scaling and fault-tolerance benchmarks are pre-run; results live in `results/benchmark/`:
 
-```matlab
-addpath(genpath('matlab/src'))
-RunBenchmarks('results/benchmark')        % full ~720-trial sweep (slow)
-RunBenchmarksSmoke('results/benchmark')   % 8 trials, finishes in ~2 min
-```
-
-See [matlab/README.md](matlab/README.md) for details.
+- `coverage_vs_size_*.png` — coverage improvement as fleet size grows
+- `accuracy_vs_noise_*.png` — mapping accuracy under sensor noise
+- `heatmap_*.png` — spatial coverage heatmap
 
 ## Architecture in one paragraph
 
@@ -99,4 +93,4 @@ every robot's map into `/swarm/global_map` (an `OccupancyGrid`) for RViz.
 
 ---
 
-**Status:** RViz + browser dashboard simulation, MATLAB benchmarks, CI green.
+**Status:** RViz + browser dashboard simulation, C++ unit tests, CI wired.
