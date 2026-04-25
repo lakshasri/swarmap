@@ -1,0 +1,30 @@
+/**:
+  ros__parameters:
+    # ── Simulation ────────────────────────────────────────────────────────────
+    num_robots: 10           # number of robots to spawn
+    use_sim_time: false
+
+    # ── Sensor ────────────────────────────────────────────────────────────────
+    sensor_range: 5.0        # LiDAR max range in metres
+    noise_level: 0.0         # Gaussian noise fraction applied to ranges (0 = none)
+
+    # ── Communication ─────────────────────────────────────────────────────────
+
+    comm_radius: 8.0         # inter-robot communication radius in metres
+
+    # ── Mapping ───────────────────────────────────────────────────────────────
+    map_resolution: 0.1      # metres per occupancy grid cell
+    map_width_m: 50.0        # total grid width in metres
+    map_height_m: 50.0       # total grid height in metres
+
+    # ── Navigation ────────────────────────────────────────────────────────────
+    goal_tolerance: 0.3      # metres — considered "arrived" when closer than this
+    update_rate_hz: 10.0     # exploration + cmd_vel tick rate (matches world_sim tick)
+
+    # ── Frontier detection ────────────────────────────────────────────────────
+    frontier_min_size: 5.0   # minimum frontier cluster size in cells
+
+    # ── Battery ───────────────────────────────────────────────────────────────
+    battery_drain_rate: 0.001  # fraction drained per second (1.0 → empty in ~16 min)
+    battery_weight: 2.0        # scales how aggressively low-battery robots avoid far frontiers
+    dock_return_safety: 0.85   # return if time_to_dock > safety * time_to_empty

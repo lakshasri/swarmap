@@ -1,0 +1,23 @@
+/**:
+  ros__parameters:
+    # rosbridge_server configuration
+    port: 9090
+    address: ""              # bind to all interfaces
+    ssl: false
+    certfile: ""
+    keyfile: ""
+
+    # Performance
+    max_message_size: 10485760    # 10 MB — large enough for compressed map deltas
+    fragment_timeout: 600
+    delay_between_messages: 0.0
+    max_burst_interface_frequency: 0.0
+
+    # Compression — reduces WebSocket traffic for occupancy grid payloads
+    compression: "none"          # "none" | "png"
+    authenticate: false
+
+    # Logging
+    topics_glob: "[*]"
+    services_glob: "[*]"
+    params_glob: "[*]"

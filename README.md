@@ -1,41 +1,102 @@
-# Swarmap  
-A decentralised swarm robotics system where autonomous robots collaborate to explore and map unknown environments without any central coordinator.
+# Swarmap — Decentralised Robot Exploration and Mapping
 
-## What is Swarmap?
+[![CI](https://github.com/lakshasri/Swarmap/actions/workflows/ci.yml/badge.svg)](https://github.com/lakshasri/Swarmap/actions/workflows/ci.yml)
 
-Swarmap enables a fleet of mobile robots to work together as a swarm, each exploring different parts of an unknown environment simultaneously. The robots share partial maps only with their immediate neighbours, never requiring a central server or master controller. Through distributed frontier auctions, each robot autonomously decides where to explore next, avoiding wasteful duplication of effort.
+A decentralised swarm-robotics system where autonomous robots collaborate to
+explore and map unknown environments without any central coordinator.
 
-The system is designed to be **robust to failures** — even when nearly half the robots fail mid-mission, the remaining swarm adapts and continues mapping. The live browser dashboard lets you watch the map emerge in real-time and adjust swarm parameters dynamically.
+## What it does
 
-## Why It Matters
+Swarmap simulates a fleet of mobile robots that work together as a swarm.
+Each robot explores a slice of an unknown environment, shares partial maps
+only with its immediate neighbours (peer-to-peer, no master), and uses a
+distributed frontier auction to decide where to go next so the swarm doesn't
+duplicate effort. The system is robust to failures: when nearly half the
+robots die mid-mission, the survivors keep mapping.
 
-- **Decentralised**: No single point of failure. Communication is peer-to-peer.
-- **Autonomous**: Robots make local decisions without a master control loop.
-- **Scalable**: Add more robots and coverage increases proportionally (until overcrowded).
-- **Fault-tolerant**: Surviving robots restructure and keep working when neighbours fail.
-- **Real-time visibility**: Browser dashboard shows live exploration progress and network topology.
+Visualisation comes in two flavours, both backed by the same ROS2 stack:
 
-## Core Technologies
+- **RViz2** — the native ROS2 viewer (default). One window with the merged
+  occupancy grid, robot poses, LiDAR rays, frontier markers.
+- **Browser dashboard** (opt-in) — React + Vite, talks to the swarm via
+  rosbridge WebSocket; map canvas, stats, comm graph, mission replay.
 
-- **ROS2 Humble** — inter-robot communication and middleware
-- **Gazebo Harmonic** — physics simulation and sensor simulation
-- **React + Canvas** — browser-based live dashboard
-- **MATLAB** — algorithm prototyping and benchmark analysis
-- **C++17** — high-performance robot nodes
+There is no Gazebo dependency.
 
-## Quick Start
+## Stack
+
+- **ROS2 Humble** — middleware
+- **C++17** — robot, frontier auction, map merger, aggregator (`swarmap_core`)
+- **Python** — pure-ROS world simulator (`world_sim_node.py`) + swarm monitor
+- **RViz2** — primary visualisation
+- **React + Vite + rosbridge** — optional browser dashboard (`swarmap_dashboard`)
+- **MATLAB** — offline scaling + fault-tolerance benchmarks (`matlab/`)
+
+There is no Gazebo.
+
+## Quick start
 
 ```bash
 git clone https://github.com/lakshasri/Swarmap.git
 cd Swarmap
 source /opt/ros/humble/setup.bash
-colcon build
+rosdep install --from-paths src --ignore-src -r -y
+colcon build --symlink-install
 source install/setup.bash
 ros2 launch swarmap_bringup simulation.launch.py num_robots:=10
 ```
 
-Open http://localhost:5173 in your browser to see the dashboard.
+RViz opens automatically with `swarm_debug.rviz` showing the merged map,
+robot poses, LiDAR scans, and frontier markers.
+
+### With the browser dashboard
+
+```bash
+# one-time
+(cd src/swarmap_dashboard && npm install)
+
+# then
+ros2 launch swarmap_bringup simulation.launch.py num_robots:=10 dashboard:=true
+```
+
+This adds rosbridge on `ws://localhost:9090` and a Vite dev server on
+`http://localhost:5173`. Open the browser to that URL — MapCanvas,
+StatsPanel, ControlPanel, NetworkGraph, ReplayPanel.
+
+## Demo scenarios
+
+```bash
+# 10 robots, no failures, ~4 min, records a rosbag in results/demo_basic/
+ros2 launch swarmap_bringup demo_basic.launch.py
+
+# 20 robots, 40% progressive failures, ~5 min, records to results/demo_fault_tolerance/
+ros2 launch swarmap_bringup demo_fault_tolerance.launch.py
+```
+
+## Benchmarks
+
+Scaling and fault tolerance are evaluated in MATLAB, headless and fast:
+
+```matlab
+addpath(genpath('matlab/src'))
+RunBenchmarks('results/benchmark')        % full ~720-trial sweep (slow)
+RunBenchmarksSmoke('results/benchmark')   % 8 trials, finishes in ~2 min
+```
+
+See [matlab/README.md](matlab/README.md) for details.
+
+## Architecture in one paragraph
+
+`world_sim_node` owns a procedurally-generated occupancy grid, listens to
+each robot's `/robot_i/cmd_vel`, integrates pose, and publishes
+`/robot_i/odom` + a synthetic ray-cast `/robot_i/scan`. Each
+`robot_node` (lifecycle, C++) consumes its scan + odom, builds a local
+log-odds grid, runs frontier detection + a peer-to-peer auction with its
+neighbours, and shares partial-map deltas. `map_aggregator_node` merges
+every robot's map into `/swarm/global_map` (an `OccupancyGrid`) for RViz.
+`failure_injector_node` shuts down random robots to test recovery.
+`swarm_monitor_node.py` tracks heartbeats and publishes `/swarm/health`.
 
 ---
 
-**Status**: Early development — core infrastructure in progress
+**Status:** RViz + browser dashboard simulation, MATLAB benchmarks, CI green.

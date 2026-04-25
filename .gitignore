@@ -26,14 +26,23 @@ devel/
 # Colcon
 .colcon/
 
-# Results and outputs
-results/
+# Results and outputs (keep README and empty directory markers)
+results/**
+!results/README.md
+!results/**/.gitkeep
 *.bag
 *.bag.db3
 
-# Node modules
+# MATLAB outputs
+matlab/results/*
+!matlab/results/.gitkeep
+matlab/worlds/generated_*
+*.asv
+*.m~
+
+# Node modules (dashboard)
 node_modules/
-*.lock
+yarn.lock
 
 # Environment
 .env
@@ -41,10 +50,8 @@ node_modules/
 venv/
 env/
 
-# Project planning (internal use only)
-plans/
-
 # Temporary files
 *.tmp
 *.temp
 .cache/
+octave-workspace
