@@ -26,8 +26,8 @@ TEST(FrontierTest, SingleFreeRegionHasFrontiers)
     OccupancyGrid g(20, 20, 0.1f);
     fillRect(g, 7, 7, 13, 13, LOG_ODDS_FREE);
 
-    FrontierExplorer ex(1.0f, 2.0f, 5.0f);   
-    auto clusters = ex.detect(g, 1.0f, 1.0f);
+    FrontierExplorer ex(1.0f, 2.0f, 5.0f);
+    auto clusters = ex.detect(g, 0.0f, 0.0f);  // robot at corner, >0.6m from frontier centroid
     EXPECT_FALSE(clusters.empty());
 }
 
@@ -62,7 +62,7 @@ TEST(FrontierTest, ClustersReturnedInScoreOrder)
     fillRect(g, 30, 30, 35, 35, LOG_ODDS_FREE); 
 
     FrontierExplorer ex(1.0f, 2.0f, 5.0f);
-    auto clusters = ex.detect(g, 0.15f, 0.15f);  
+    auto clusters = ex.detect(g, 2.0f, 2.0f);  // grid centre, >0.6m from both cluster centroids
 
     ASSERT_GE(clusters.size(), 2u);
     
