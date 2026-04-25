@@ -17,22 +17,72 @@ OCC = 100
 
 
 def build_world(width_cells: int, height_cells: int, seed: int = 7) -> np.ndarray:
+    """
+    Clean rectangular obstacle world. Axis-aligned rectangles on a grid,
+    with a perimeter wall, some interior rooms, pillars, and guaranteed
+    free neighborhoods around docks + the central spawn band.
+    """
     rng = random.Random(seed)
     grid = np.zeros((height_cells, width_cells), dtype=np.int8)
-    grid[0, :] = OCC
-    grid[-1, :] = OCC
-    grid[:, 0] = OCC
-    grid[:, -1] = OCC
 
-    for _ in range(18):
-        w = rng.randint(15, 45)
-        h = rng.randint(2, 5)
-        x = rng.randint(20, width_cells - w - 20)
-        y = rng.randint(20, height_cells - h - 20)
-        if rng.random() < 0.5:
-            grid[y:y + h, x:x + w] = OCC
-        else:
-            grid[y:y + w, x:x + h] = OCC
+    # Perimeter wall (3 cells thick)
+    grid[0:3, :] = OCC
+    grid[-3:, :] = OCC
+    grid[:, 0:3] = OCC
+    grid[:, -3:] = OCC
+
+    def place_rect(x, y, w, h):
+        x = max(3, min(x, width_cells - 3 - w))
+        y = max(3, min(y, height_cells - 3 - h))
+        grid[y:y + h, x:x + w] = OCC
+
+    def clear_rect(x, y, w, h):
+        x0 = max(0, x); y0 = max(0, y)
+        x1 = min(width_cells, x + w); y1 = min(height_cells, y + h)
+        grid[y0:y1, x0:x1] = FREE
+
+    # Dock cell coordinates (must match robot_node.cpp docks_):
+    # center + 4 quadrants at 25%/75% of world
+    dock_centers = [
+        (width_cells // 2, height_cells // 2),
+        (width_cells // 4, height_cells // 4),
+        (3 * width_cells // 4, height_cells // 4),
+        (width_cells // 4, 3 * height_cells // 4),
+        (3 * width_cells // 4, 3 * height_cells // 4),
+    ]
+
+    # Large rectangular obstacles
+    placements = [
+        (80,  80,  60, 15),
+        (200, 100, 40, 80),
+        (100, 220, 90, 20),
+        (320, 180, 25, 100),
+        (260, 340, 120, 30),
+        (90,  360, 40, 70),
+        (380, 80,  30, 60),
+    ]
+
+    def overlaps_dock(sx, sy, sw, sh, margin=12):
+        for (dx, dy) in dock_centers:
+            if (sx - margin <= dx <= sx + sw + margin and
+                sy - margin <= dy <= sy + sh + margin):
+                return True
+        return False
+
+    for (x, y, w, h) in placements:
+        sx = int(x * width_cells / 500.0)
+        sy = int(y * height_cells / 500.0)
+        sw = max(4, int(w * width_cells / 500.0))
+        sh = max(4, int(h * height_cells / 500.0))
+        # Skip obstacles that would overlap a dock
+        if overlaps_dock(sx, sy, sw, sh):
+            continue
+        place_rect(sx, sy, sw, sh)
+
+    # Carve wide free neighborhoods around each dock (2m radius)
+    for (dx, dy) in dock_centers:
+        clear_rect(dx - 10, dy - 10, 20, 20)
+
     return grid
 
 
@@ -73,10 +123,14 @@ class WorldSim(Node):
         self.robots: dict[str, dict] = {}
         self._static_tf_msgs: list[TransformStamped] = []
 
-        spacing = self.width_m / (self.n_initial + 1)
+        # Scatter robots randomly across the map, with a minimum separation of
+        # ~4 m between any two to avoid immediate conflicts.
+        placed: list[tuple[float, float]] = []
+        min_sep_m = 4.0
         for i in range(self.n_initial):
-            x = spacing * (i + 1)
-            y = self.height_m * 0.5
+            x, y = self._random_safe_spawn(placed, clearance_cells=10,
+                                            min_sep_m=min_sep_m)
+            placed.append((x, y))
             self._add_robot(f'robot_{i}', x, y)
         self._republish_static_tfs()
 
@@ -131,7 +185,9 @@ class WorldSim(Node):
         rid = msg.data.strip()
         if not rid or rid in self.robots:
             return
-        x, y = self._find_free_spawn()
+        # Use random scatter with min separation from existing robots
+        existing = [(r['pose'][0], r['pose'][1]) for r in self.robots.values()]
+        x, y = self._random_safe_spawn(existing, clearance_cells=10, min_sep_m=4.0)
         self._add_robot(rid, x, y)
         self._republish_static_tfs()
         self.get_logger().info(f'world: spawned {rid} at ({x:.1f}, {y:.1f})')
@@ -216,6 +272,86 @@ class WorldSim(Node):
             return True
         return self.grid[gy, gx] == OCC
 
+    def _robot_body_blocked(self, wx: float, wy: float, body_radius: int = 2) -> bool:
+        """True if any cell within `body_radius` of the robot's world position is occupied."""
+        cgx, cgy = self._world_to_grid(wx, wy)
+        for dy in range(-body_radius, body_radius + 1):
+            for dx in range(-body_radius, body_radius + 1):
+                if dx * dx + dy * dy > body_radius * body_radius:
+                    continue
+                if self._cell_occupied(cgx + dx, cgy + dy):
+                    return True
+        return False
+
+    def _random_safe_spawn(self, already_placed: list[tuple[float, float]],
+                            clearance_cells: int = 10,
+                            min_sep_m: float = 4.0) -> tuple[float, float]:
+        """Pick a random cell with clearance and at least `min_sep_m` from all
+        already-placed robots. Falls back to relaxed constraints if needed."""
+
+        def has_clearance(gx, gy):
+            for dy in range(-clearance_cells, clearance_cells + 1):
+                for dx in range(-clearance_cells, clearance_cells + 1):
+                    if self._cell_occupied(gx + dx, gy + dy):
+                        return False
+            return True
+
+        margin = clearance_cells + 2
+        for min_sep in (min_sep_m, min_sep_m * 0.5, 0.0):
+            for _ in range(500):
+                gx = random.randint(margin, self.w_cells - margin - 1)
+                gy = random.randint(margin, self.h_cells - margin - 1)
+                if not has_clearance(gx, gy):
+                    continue
+                wx = (gx + 0.5) * self.res
+                wy = (gy + 0.5) * self.res
+                if any(math.hypot(wx - px, wy - py) < min_sep
+                       for (px, py) in already_placed):
+                    continue
+                return wx, wy
+        self.get_logger().warning('_random_safe_spawn: falling back to centre')
+        return self.width_m * 0.5, self.height_m * 0.5
+
+    def _safe_spawn(self, x: float, y: float, clearance_cells: int = 10) -> tuple[float, float]:
+        """Find a spawn position with at least `clearance_cells` of free space around it.
+        Snaps to cell centers so initial positions line up cleanly on the grid."""
+        cgx, cgy = self._world_to_grid(x, y)
+
+        def has_clearance(gx, gy):
+            for dy in range(-clearance_cells, clearance_cells + 1):
+                for dx in range(-clearance_cells, clearance_cells + 1):
+                    if self._cell_occupied(gx + dx, gy + dy):
+                        return False
+            return True
+
+        if has_clearance(cgx, cgy):
+            return (cgx + 0.5) * self.res, (cgy + 0.5) * self.res
+
+        for r in range(1, 40):
+            for dy in range(-r, r + 1):
+                for dx in range(-r, r + 1):
+                    if abs(dx) != r and abs(dy) != r:
+                        continue
+                    if has_clearance(cgx + dx, cgy + dy):
+                        return ((cgx + dx) + 0.5) * self.res, ((cgy + dy) + 0.5) * self.res
+        self.get_logger().warning(f'_safe_spawn: no clear cell near ({x:.1f},{y:.1f})')
+        return self._nearest_free(x, y)
+
+    def _nearest_free(self, x: float, y: float) -> tuple[float, float]:
+        """Return (x, y) if free, else scan outward for the nearest free cell."""
+        gx, gy = self._world_to_grid(x, y)
+        if not self._cell_occupied(gx, gy):
+            return x, y
+        for r in range(1, 30):
+            for dy in range(-r, r + 1):
+                for dx in range(-r, r + 1):
+                    if abs(dx) != r and abs(dy) != r:
+                        continue
+                    if not self._cell_occupied(gx + dx, gy + dy):
+                        return (gx + dx + 0.5) * self.res, (gy + dy + 0.5) * self.res
+        self.get_logger().warning(f'_nearest_free: no free cell near ({x:.1f}, {y:.1f})')
+        return x, y
+
     def _raycast(self, x: float, y: float, theta: float) -> float:
         step = self.res * 0.5
         max_steps = int(self.range_max / step)
@@ -244,6 +380,8 @@ class WorldSim(Node):
             ny = y + v * math.sin(th) * self.dt
             nth = th + w * self.dt
 
+            # Trust A* (which plans with clearance=1) to keep robots off walls.
+            # World_sim just does point-mass collision on the target cell.
             ngx, ngy = self._world_to_grid(nx, ny)
             if not self._cell_occupied(ngx, ngy):
                 x, y = nx, ny

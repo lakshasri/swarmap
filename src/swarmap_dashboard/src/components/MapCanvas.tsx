@@ -61,20 +61,21 @@ function rasterizeMerged(
     else if (useTruth && truth!.data[i] === 100) cells[i] = CELL_TRUTH
   }
 
-  // Dilate walls by 1 cell so they're visible as solid lines not scattered dots
-  const dilated = new Uint8Array(cells)
-  for (let gy = 0; gy < height; ++gy) {
-    for (let gx = 0; gx < width; ++gx) {
-      if (cells[gy * width + gx] !== CELL_WALL) continue
+  // Noise filter: drop isolated wall cells (0 or 1 wall neighbour are treated
+  // as false positives — real walls are always continuous). Does NOT dilate.
+  const filtered = new Uint8Array(cells)
+  for (let gy = 1; gy < height - 1; ++gy) {
+    for (let gx = 1; gx < width - 1; ++gx) {
+      const i = gy * width + gx
+      if (cells[i] !== CELL_WALL) continue
+      let neigh = 0
       for (let dy = -1; dy <= 1; ++dy) {
         for (let dx = -1; dx <= 1; ++dx) {
-          const ny = gy + dy, nx = gx + dx
-          if (ny < 0 || ny >= height || nx < 0 || nx >= width) continue
-          const ni = ny * width + nx
-          if (dilated[ni] === CELL_FREE || dilated[ni] === CELL_UNK)
-            dilated[ni] = CELL_WALL
+          if (dx === 0 && dy === 0) continue
+          if (cells[(gy + dy) * width + (gx + dx)] === CELL_WALL) ++neigh
         }
       }
+      if (neigh < 2) filtered[i] = CELL_FREE   // lone wall pixel → noise
     }
   }
 
@@ -86,7 +87,7 @@ function rasterizeMerged(
   }
   for (let gy = 0; gy < height; ++gy) {
     for (let gx = 0; gx < width; ++gx) {
-      const [r, g, b] = palette[dilated[gy * width + gx]]
+      const [r, g, b] = palette[filtered[gy * width + gx]]
       const idx = ((height - 1 - gy) * width + gx) * 4
       img.data[idx] = r; img.data[idx+1] = g; img.data[idx+2] = b; img.data[idx+3] = 255
     }

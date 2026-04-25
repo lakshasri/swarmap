@@ -29,8 +29,11 @@ int8_t OccupancyGrid::getCellRos(int gx, int gy) const
     // FIX #1: use threshold instead of exact float equality
     if (std::abs(lo) < 0.01f) return CELL_UNKNOWN;
     float p = 1.0f / (1.0f + std::exp(-lo));
-    if (p > 0.75f) return CELL_OCCUPIED;
-    if (p < 0.35f) return CELL_FREE;
+    // Tighter thresholds to reduce noise → wall hallucinations.
+    // A single hit (log-odds +1.386) is NOT enough to mark occupied; needs
+    // multiple consistent hits (log-odds > ~1.9, i.e. p > 0.87).
+    if (p > 0.87f) return CELL_OCCUPIED;
+    if (p < 0.25f) return CELL_FREE;
     return CELL_UNKNOWN;
 }
 

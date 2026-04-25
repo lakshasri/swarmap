@@ -3,19 +3,18 @@
 
 Listens to plain std_msgs/String messages from the React dashboard:
 
-  /swarm/spawn_robot          data = ""           (spawn next available robot_id)
-  /swarm/kill_robot           data = "robot_3"
-  /swarm/set_param_request    data = '{"param":"failure_rate","value":0.2}'
-  /swarm/inject_failure_now   data = ""
+  /swarm/spawn_robot_request    data = ""          spawn next available robot_id
+  /swarm/kill_robot_request     data = "robot_3"   kill specific robot
+  /swarm/pause_request          data = ""          pause world_sim
+  /swarm/resume_request         data = ""          resume world_sim
+  /swarm/stop_request           data = ""          pause + kill all robots
+  /swarm/reset_map_request      data = ""          clear all occupancy grids
 
 Spawn launches a new robot_node OS process and notifies world_sim_node
 to wire up the corresponding scan/odom/cmd plumbing. Kill triggers a
-lifecycle SHUTDOWN. set_param_request fans SetParameters out to the
-nodes that own each parameter.
+lifecycle SHUTDOWN and pkills the process.
 """
-import json
 import os
-import random
 import subprocess
 
 import rclpy
@@ -23,17 +22,6 @@ from rclpy.node import Node
 from std_msgs.msg import String
 from lifecycle_msgs.srv import ChangeState
 from lifecycle_msgs.msg import Transition
-from rcl_interfaces.srv import SetParameters
-from rcl_interfaces.msg import Parameter, ParameterValue, ParameterType
-
-
-PARAM_ROUTES = {
-    'failure_rate':  ['/failure_injector_node'],
-    'failure_mode':  ['/failure_injector_node'],
-    'noise_level':   ['/world_sim_node'],
-    'sensor_range':  ['ROBOTS'],
-    'comm_radius':   ['ROBOTS'],
-}
 
 MAX_ROBOTS = 32
 
@@ -57,10 +45,6 @@ class DashboardBridgeNode(Node):
                                  self._on_spawn_request, 10)
         self.create_subscription(String, '/swarm/kill_robot_request',
                                  self._on_kill_request, 10)
-        self.create_subscription(String, '/swarm/set_param_request',
-                                 self._on_set_param, 10)
-        self.create_subscription(String, '/swarm/inject_failure_now',
-                                 self._on_inject_failure, 10)
         self.create_subscription(String, '/swarm/pause_request',
                                  self._on_pause, 10)
         self.create_subscription(String, '/swarm/resume_request',
@@ -157,63 +141,6 @@ class DashboardBridgeNode(Node):
                 pass
 
         self.get_logger().warning(f'Killed {rid}')
-
-    def _on_set_param(self, msg: String):
-        try:
-            payload = json.loads(msg.data)
-            param = str(payload['param'])
-            value = payload['value']
-        except (json.JSONDecodeError, KeyError, TypeError) as e:
-            self.get_logger().warning(f'Bad set_param_request: {e}')
-            return
-
-        targets = PARAM_ROUTES.get(param)
-        if not targets:
-            self.get_logger().warning(f'Unknown parameter {param!r}')
-            return
-
-        pv = ParameterValue()
-        if isinstance(value, bool):
-            pv.type = ParameterType.PARAMETER_BOOL
-            pv.bool_value = value
-        elif isinstance(value, (int, float)):
-            pv.type = ParameterType.PARAMETER_DOUBLE
-            pv.double_value = float(value)
-        else:
-            pv.type = ParameterType.PARAMETER_STRING
-            pv.string_value = str(value)
-
-        # FIX #6: copy self.alive to avoid race with _on_kill_request
-        nodes: list[str] = []
-        alive_snapshot = set(self.alive)
-        for t in targets:
-            if t == 'ROBOTS':
-                nodes.extend(f'/{rid}/robot_node' for rid in alive_snapshot)
-            else:
-                nodes.append(t)
-
-        for node_name in nodes:
-            self._call_set_param(node_name, param, pv)
-
-    def _call_set_param(self, node_name: str, param: str, pv: ParameterValue):
-        service_name = f'{node_name}/set_parameters'
-        client = self.create_client(SetParameters, service_name)
-        if not client.wait_for_service(timeout_sec=0.5):
-            return
-        req = SetParameters.Request()
-        p = Parameter()
-        p.name = param
-        p.value = pv
-        req.parameters = [p]
-        client.call_async(req)
-
-    def _on_inject_failure(self, _msg: String):
-        if not self.alive:
-            return
-        target = random.choice(sorted(self.alive))
-        m = String()
-        m.data = target
-        self._on_kill_request(m)
 
     def _on_pause(self, _msg: String):
         self._pause_pub.publish(String())

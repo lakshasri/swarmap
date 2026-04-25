@@ -29,16 +29,17 @@
 #include "swarmap_msgs/msg/partial_map.hpp"
 #include "swarmap_msgs/msg/frontier_bid.hpp"
 #include "lifecycle_msgs/msg/transition.hpp"
+#include "visualization_msgs/msg/marker.hpp"
 
 #include "swarmap_core/occupancy_grid.hpp"
 #include "swarmap_core/frontier_explorer.hpp"
 #include "swarmap_core/map_merger.hpp"
 #include "swarmap_core/neighbour_tracker.hpp"
+#include "swarmap_core/path_planner.hpp"
 
 using namespace std::chrono_literals;
 using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
 
-// FIX #8: safe angle normalization (no while-loops)
 static float normalizeAngle(float a) {
     return std::atan2(std::sin(a), std::cos(a));
 }
@@ -59,9 +60,6 @@ static std::string stateStr(RobotState s) {
     return "UNKNOWN";
 }
 
-// Navigation mode for Bug2-style algorithm
-enum class NavMode { GOAL_SEEK, WALL_FOLLOW };
-
 class RobotNode : public rclcpp_lifecycle::LifecycleNode {
 public:
     explicit RobotNode(const rclcpp::NodeOptions &opts = rclcpp::NodeOptions())
@@ -79,7 +77,7 @@ public:
         declare_parameter("dock_return_safety",   0.85);
         declare_parameter("goal_tolerance",       0.3);
         declare_parameter("frontier_min_size",    5.0f);
-        declare_parameter("update_rate_hz",       5.0);
+        declare_parameter("update_rate_hz",       10.0);
     }
 
     CallbackReturn on_configure(const rclcpp_lifecycle::State &) override
@@ -99,7 +97,6 @@ public:
         grid_ = std::make_unique<OccupancyGrid>(w_cells, h_cells, res, 0.0f, 0.0f);
         grid_->markAllDirty();
 
-        // 5 docks: center + 4 quadrants
         float mw = static_cast<float>(get_parameter("map_width_m").as_double());
         float mh = static_cast<float>(get_parameter("map_height_m").as_double());
         docks_ = {
@@ -112,10 +109,11 @@ public:
 
         explorer_ = std::make_unique<FrontierExplorer>(
             get_parameter("frontier_min_size").as_double(),
-            3.0f, 6.0f,  // sigma=3m, weight=6 — moderate revisit penalty
+            3.0f, 6.0f,
             static_cast<float>(get_parameter("battery_weight").as_double()));
         merger_   = std::make_unique<MapMerger>();
         tracker_  = std::make_unique<NeighbourTracker>();
+        planner_  = std::make_unique<PathPlanner>();
         tf_buffer_= std::make_unique<tf2_ros::Buffer>(get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
@@ -129,6 +127,7 @@ public:
         pub_disc_   = create_publisher<swarmap_msgs::msg::NeighbourDiscovery>("/swarm/discovery", qos_reliable);
         pub_bid_    = create_publisher<swarmap_msgs::msg::FrontierBid>(ns + "/frontier_bid", qos_reliable);
         pub_acc_    = create_publisher<std_msgs::msg::Float32>(ns + "/map_accuracy", qos_reliable);
+        pub_path_   = create_publisher<visualization_msgs::msg::Marker>(ns + "/path", qos_best);
 
         sub_scan_ = create_subscription<sensor_msgs::msg::LaserScan>(
             ns + "/scan", qos_best,
@@ -139,7 +138,6 @@ public:
         sub_disc_ = create_subscription<swarmap_msgs::msg::NeighbourDiscovery>(
             "/swarm/discovery", qos_reliable,
             [this](swarmap_msgs::msg::NeighbourDiscovery::SharedPtr msg){ onDiscovery(msg); });
-
         sub_reset_ = create_subscription<std_msgs::msg::String>(
             "/swarm/reset_map", rclcpp::QoS(10).reliable(),
             [this](std_msgs::msg::String::SharedPtr){
@@ -148,8 +146,8 @@ public:
                     grid_->width(), grid_->height(), grid_->resolution(), 0.0f, 0.0f);
                 grid_->markAllDirty();
                 explorer_->clearVisited();
+                path_.clear(); path_idx_ = 0;
                 has_goal_ = false;
-                nav_mode_ = NavMode::GOAL_SEEK;
                 state_ = RobotState::EXPLORING;
                 RCLCPP_INFO(get_logger(), "[%s] Map RESET", robot_id_.c_str());
             });
@@ -184,15 +182,11 @@ public:
 
     CallbackReturn on_cleanup(const rclcpp_lifecycle::State &) override
     {
-        grid_.reset(); explorer_.reset(); merger_.reset(); tracker_.reset();
+        grid_.reset(); explorer_.reset(); merger_.reset(); tracker_.reset(); planner_.reset();
         return CallbackReturn::SUCCESS;
     }
 
-    CallbackReturn on_shutdown(const rclcpp_lifecycle::State &) override
-    {
-        stop();
-        return CallbackReturn::SUCCESS;
-    }
+    CallbackReturn on_shutdown(const rclcpp_lifecycle::State &) override { stop(); return CallbackReturn::SUCCESS; }
 
 private:
     std::string robot_id_;
@@ -203,31 +197,22 @@ private:
     double sensor_range_ = 5.0;
     double comm_radius_  = 8.0;
     double noise_level_  = 0.0;
-    float  goal_tol_     = 0.3f;  // FIX #11: cached parameter
+    float  goal_tol_     = 0.3f;
 
     float  goal_x_ = 0.0f, goal_y_ = 0.0f;
     bool   has_goal_ = false;
     bool   returning_to_dock_ = false;
 
-    // Bug2 navigation state
-    NavMode nav_mode_ = NavMode::GOAL_SEEK;
-    float   hit_x_ = 0.0f, hit_y_ = 0.0f;  // where we first hit the wall
-    int     wall_follow_steps_ = 0;
-    static constexpr int MAX_WALL_FOLLOW = 250;  // max steps (~50s at 5Hz) before giving up
+    // A* planned path (cell-level) + current waypoint index
+    std::vector<std::pair<int,int>> path_;
+    size_t path_idx_ = 0;
+    int    replan_cooldown_ = 0;
+    int    blocked_ticks_ = 0;   // consecutive ticks stopped by a wall
 
-    // Stuck detection
-    double pose_x_last_ = 0.0, pose_y_last_ = 0.0;
-    double last_moved_time_ = 0.0;
-    static constexpr double STUCK_TIMEOUT_S  = 8.0;
-    // FIX #10: use cumulative distance, not instantaneous
-    double cumulative_dist_ = 0.0;
-
-    // Scan summary for obstacle avoidance
     float nearest_front_ = 999.0f;
     float nearest_left_  = 999.0f;
     float nearest_right_ = 999.0f;
 
-    // Dock system
     struct Dock { float x; float y; };
     std::vector<Dock> docks_;
     double dock_arrive_time_ = 0.0;
@@ -237,6 +222,7 @@ private:
     std::unique_ptr<FrontierExplorer> explorer_;
     std::unique_ptr<MapMerger>        merger_;
     std::unique_ptr<NeighbourTracker> tracker_;
+    std::unique_ptr<PathPlanner>      planner_;
 
     std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     std::unique_ptr<tf2_ros::Buffer>               tf_buffer_;
@@ -248,13 +234,13 @@ private:
     rclcpp::Publisher<swarmap_msgs::msg::NeighbourDiscovery>::SharedPtr pub_disc_;
     rclcpp::Publisher<swarmap_msgs::msg::FrontierBid>::SharedPtr     pub_bid_;
     rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr             pub_acc_;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr    pub_path_;
 
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr    sub_scan_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr        sub_odom_;
     rclcpp::Subscription<swarmap_msgs::msg::NeighbourDiscovery>::SharedPtr sub_disc_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr          sub_reset_;
 
-    // FIX #9/#16: track subscriptions and avoid duplicates
     std::unordered_map<std::string,
         rclcpp::Subscription<swarmap_msgs::msg::PartialMap>::SharedPtr>  neighbour_map_subs_;
     std::unordered_map<std::string,
@@ -270,24 +256,24 @@ private:
     {
         if (state_ == RobotState::FAILED) return;
 
-        // Summarise scan for obstacle avoidance
-        float nf = msg->range_max, nl = msg->range_max, nr = msg->range_max;
+        float nf = msg->range_max;
+        float nl = msg->range_max;
+        float nr = msg->range_max;
         float angle = msg->angle_min;
         for (float raw_range : msg->ranges) {
             float r = std::clamp(raw_range, msg->range_min, msg->range_max);
             if (std::isnan(r) || std::isinf(r)) { angle += msg->angle_increment; continue; }
             float a = normalizeAngle(angle);
             float aa = std::abs(a);
-            if (aa < 0.79f)               nf = std::min(nf, r);
-            else if (a > 0 && aa < 1.57f) nl = std::min(nl, r);
-            else if (a < 0 && aa < 1.57f) nr = std::min(nr, r);
+            if (aa < 0.79f)               nf = std::min(nf, r);   // ±45° front
+            else if (a > 0 && aa < 2.36f) nl = std::min(nl, r);   // left 45°-135°
+            else if (a < 0 && aa < 2.36f) nr = std::min(nr, r);   // right 45°-135°
             angle += msg->angle_increment;
         }
         nearest_front_ = nf;
         nearest_left_  = nl;
         nearest_right_ = nr;
 
-        // FIX #4: copy scan data, lock briefly for grid update
         struct Ray { float ex, ey; bool hit; };
         std::vector<Ray> rays;
         rays.reserve(msg->ranges.size());
@@ -309,11 +295,8 @@ private:
             a2 += msg->angle_increment;
         }
 
-        // Now lock and update grid
         std::unique_lock lock(grid_->mutex);
-        for (auto &ray : rays) {
-            rayCast(px, py, ray.ex, ray.ey, ray.hit);
-        }
+        for (auto &ray : rays) rayCast(px, py, ray.ex, ray.ey, ray.hit);
     }
 
     void rayCast(float sx, float sy, float ex, float ey, bool mark_endpoint)
@@ -339,28 +322,16 @@ private:
         }
     }
 
-    // ── Odometry ─────────────────────────────────────────────────────
     void onOdom(const nav_msgs::msg::Odometry::SharedPtr &msg)
     {
-        double old_x = pose_x_, old_y = pose_y_;
         pose_x_ = msg->pose.pose.position.x;
         pose_y_ = msg->pose.pose.position.y;
         auto &q = msg->pose.pose.orientation;
         pose_theta_ = std::atan2(2.0*(q.w*q.z + q.x*q.y),
                                  1.0 - 2.0*(q.y*q.y + q.z*q.z));
         broadcastTF(msg->header.stamp);
-
-        // FIX #10: cumulative distance for stuck detection
-        double now = get_clock()->now().seconds();
-        cumulative_dist_ += std::hypot(pose_x_ - old_x, pose_y_ - old_y);
-        if (cumulative_dist_ > 0.3) {  // moved 0.3m total
-            cumulative_dist_ = 0.0;
-            last_moved_time_ = now;
-        }
-        if (last_moved_time_ == 0.0) last_moved_time_ = now;
     }
 
-    // ── Discovery / neighbor comms ───────────────────────────────────
     void onDiscovery(const swarmap_msgs::msg::NeighbourDiscovery::SharedPtr &msg)
     {
         if (msg->robot_id == robot_id_) return;
@@ -369,7 +340,6 @@ private:
                                    msg->position.x, msg->position.y,
                                    msg->comm_radius, now);
 
-        // FIX #9: use try_emplace to avoid overwriting existing subscription
         if (neighbour_map_subs_.find(msg->robot_id) == neighbour_map_subs_.end()) {
             const std::string ns = "/" + msg->robot_id;
             auto qos = rclcpp::QoS(5).reliable();
@@ -381,15 +351,12 @@ private:
                 create_subscription<swarmap_msgs::msg::FrontierBid>(
                     ns + "/frontier_bid", qos,
                     [this](swarmap_msgs::msg::FrontierBid::SharedPtr m){ onNeighbourBid(m); }));
-            RCLCPP_INFO(get_logger(), "[%s] Subscribed to neighbour %s",
-                        robot_id_.c_str(), msg->robot_id.c_str());
         }
     }
 
     void onNeighbourMap(const swarmap_msgs::msg::PartialMap::SharedPtr &msg)
     {
         if (state_ == RobotState::FAILED) return;
-        // FIX #13: validate incoming data size
         if (static_cast<int>(msg->data.size()) != msg->width * msg->height) return;
         std::unique_lock lock(grid_->mutex);
         merger_->merge(*grid_, *msg, 0, 0);
@@ -401,7 +368,6 @@ private:
         explorer_->recordBid(*msg);
     }
 
-    // ── TF / Status / Discovery publish ──────────────────────────────
     void broadcastTF(const rclcpp::Time &stamp)
     {
         geometry_msgs::msg::TransformStamped t;
@@ -470,7 +436,32 @@ private:
         pub_disc_->publish(msg);
     }
 
-    // ── Dock helpers ─────────────────────────────────────────────────
+    void publishPathMarker()
+    {
+        visualization_msgs::msg::Marker m;
+        m.header.frame_id = "map";
+        m.header.stamp = get_clock()->now();
+        m.ns = robot_id_ + "_path";
+        m.id = 0;
+        m.type = visualization_msgs::msg::Marker::LINE_STRIP;
+        m.action = path_.empty() ? visualization_msgs::msg::Marker::DELETE
+                                 : visualization_msgs::msg::Marker::ADD;
+        m.pose.orientation.w = 1.0;
+        m.scale.x = 0.1;
+        m.color.r = 0.3; m.color.g = 0.9; m.color.b = 1.0; m.color.a = 0.9;
+        geometry_msgs::msg::Point p0;
+        p0.x = pose_x_; p0.y = pose_y_; p0.z = 0.1;
+        m.points.push_back(p0);
+        for (size_t i = path_idx_; i < path_.size(); ++i) {
+            float wx, wy;
+            grid_->gridToWorld(path_[i].first, path_[i].second, wx, wy);
+            geometry_msgs::msg::Point p;
+            p.x = wx; p.y = wy; p.z = 0.1;
+            m.points.push_back(p);
+        }
+        pub_path_->publish(m);
+    }
+
     Dock nearestDock() const {
         Dock best = docks_.empty() ? Dock{25.0f, 25.0f} : docks_[0];
         float bestD = 1e9f;
@@ -482,7 +473,30 @@ private:
         return best;
     }
 
-    // ── Exploration state machine ────────────────────────────────────
+    // Plan A* from current pose to goal; store cells in path_
+    bool replanPath()
+    {
+        int sgx, sgy, ggx, ggy;
+        std::shared_lock lock(grid_->mutex);
+        grid_->worldToGrid(pose_x_, pose_y_, sgx, sgy);
+        grid_->worldToGrid(goal_x_, goal_y_, ggx, ggy);
+        // stride=5 downsamples the 500x500 grid to an effective 100x100 for A*
+        // clearance=2: keep 0.2 m buffer from walls so drifting during path
+        // following doesn't push the robot into obstacles
+        // stride=5: downsample 500x500 → effective 100x100 for fast A*
+        auto p = planner_->plan(*grid_, sgx, sgy, ggx, ggy,
+                                 /*unknown_as_free=*/true, /*clearance=*/2, /*stride=*/5);
+        lock.unlock();
+        if (p.empty()) {
+            path_.clear();
+            path_idx_ = 0;
+            return false;
+        }
+        path_ = std::move(p);
+        path_idx_ = 0;
+        return true;
+    }
+
     void explorationTick()
     {
         if (state_ == RobotState::FAILED) return;
@@ -500,7 +514,7 @@ private:
         }
 
         if (state_ == RobotState::NAVIGATING) {
-            driveTowardGoal();
+            driveAlongPath();
             return;
         }
 
@@ -509,13 +523,15 @@ private:
             goal_x_ = dock.x; goal_y_ = dock.y;
             has_goal_ = true;
             returning_to_dock_ = true;
-            nav_mode_ = NavMode::GOAL_SEEK;
-            wall_follow_steps_ = 0;
-            state_ = RobotState::NAVIGATING;
+            if (replanPath()) {
+                state_ = RobotState::NAVIGATING;
+            } else {
+                RCLCPP_WARN(get_logger(), "[%s] No path to dock — will retry", robot_id_.c_str());
+            }
             return;
         }
 
-        // IDLE / EXPLORING: detect frontiers
+        // EXPLORING / IDLE: pick a frontier
         std::shared_lock lock(grid_->mutex);
         auto clusters = explorer_->detect(*grid_,
                                            static_cast<float>(pose_x_),
@@ -533,47 +549,40 @@ private:
         explorer_->expireBids(now);
 
         for (auto &cl : clusters) {
-            if (explorer_->winsAuction(robot_id_, cl.score,
-                                        cl.centroid_wx, cl.centroid_wy)) {
-                goal_x_ = cl.centroid_wx;
-                goal_y_ = cl.centroid_wy;
-                has_goal_ = true;
-                nav_mode_ = NavMode::GOAL_SEEK;
-                wall_follow_steps_ = 0;
-                state_ = RobotState::NAVIGATING;
+            if (!explorer_->winsAuction(robot_id_, cl.score, cl.centroid_wx, cl.centroid_wy)) continue;
 
-                swarmap_msgs::msg::FrontierBid bid;
-                bid.header.stamp = get_clock()->now();
-                bid.robot_id = robot_id_;
-                bid.frontier_centroid.x = cl.centroid_wx;
-                bid.frontier_centroid.y = cl.centroid_wy;
-                bid.bid_score = cl.score;
-                bid.battery_level = battery_;
-                bid.claim = true;
-                pub_bid_->publish(bid);
-                return;
-            }
+            // Try to plan a path to this frontier. If A* fails, skip and try next.
+            goal_x_ = cl.centroid_wx;
+            goal_y_ = cl.centroid_wy;
+            if (!replanPath()) continue;
+
+            has_goal_ = true;
+            state_ = RobotState::NAVIGATING;
+
+            swarmap_msgs::msg::FrontierBid bid;
+            bid.header.stamp = get_clock()->now();
+            bid.robot_id = robot_id_;
+            bid.frontier_centroid.x = cl.centroid_wx;
+            bid.frontier_centroid.y = cl.centroid_wy;
+            bid.bid_score = cl.score;
+            bid.battery_level = battery_;
+            bid.claim = true;
+            pub_bid_->publish(bid);
+            return;
         }
         state_ = RobotState::EXPLORING;
     }
 
-    // ── Bug2-style navigation ────────────────────────────────────────
-    void driveTowardGoal()
+    // ── Path following ──────────────────────────────────────────────
+    void driveAlongPath()
     {
-        if (!has_goal_) { state_ = RobotState::EXPLORING; return; }
-
-        float dx = goal_x_ - static_cast<float>(pose_x_);
-        float dy = goal_y_ - static_cast<float>(pose_y_);
-        float dist = std::hypot(dx, dy);
-
-        // Check if we reached the goal
-        if (dist < goal_tol_) {
+        if (!has_goal_ || path_.empty() || path_idx_ >= path_.size()) {
+            // Reached end of planned path
             stop();
             has_goal_ = false;
-            nav_mode_ = NavMode::GOAL_SEEK;
-            wall_follow_steps_ = 0;
+            publishPathMarker();
 
-            // Check dock arrival
+            // Dock arrival?
             bool at_dock = false;
             for (auto &d : docks_) {
                 if (std::hypot(d.x - static_cast<float>(pose_x_),
@@ -584,15 +593,11 @@ private:
             if (at_dock && returning_to_dock_) {
                 dock_arrive_time_ = get_clock()->now().seconds();
                 state_ = RobotState::DOCKING;
-                RCLCPP_INFO(get_logger(), "[%s] Docked — recharging (%.0f%%)",
-                            robot_id_.c_str(), battery_ * 100.0f);
                 return;
             }
-
             explorer_->markVisited(goal_x_, goal_y_);
             returning_to_dock_ = false;
             state_ = RobotState::EXPLORING;
-
             swarmap_msgs::msg::FrontierBid release;
             release.header.stamp = get_clock()->now();
             release.robot_id = robot_id_;
@@ -601,90 +606,110 @@ private:
             return;
         }
 
-        // Stuck detection — disabled during wall-follow (robot is actively maneuvering)
-        double now = get_clock()->now().seconds();
-        if (nav_mode_ == NavMode::GOAL_SEEK &&
-            last_moved_time_ > 0.0 && (now - last_moved_time_) > STUCK_TIMEOUT_S) {
-            RCLCPP_WARN(get_logger(), "[%s] Stuck — abandoning goal (%.1f, %.1f)",
-                        robot_id_.c_str(), goal_x_, goal_y_);
-            stop();
-            explorer_->markVisited(goal_x_, goal_y_);
-            has_goal_ = false;
-            nav_mode_ = NavMode::GOAL_SEEK;
-            wall_follow_steps_ = 0;
-            last_moved_time_ = now;
-            cumulative_dist_ = 0.0;
-            state_ = returning_to_dock_ ? RobotState::RETURNING : RobotState::EXPLORING;
+        // Check if the next few waypoints are still free; replan if a newly
+        // discovered obstacle is in the way (only every few ticks to save CPU).
+        if (replan_cooldown_ > 0) --replan_cooldown_;
+        if (replan_cooldown_ == 0) {
+            std::shared_lock lock(grid_->mutex);
+            for (size_t i = path_idx_; i < std::min(path_idx_ + 6, path_.size()); ++i) {
+                if (grid_->getCellRos(path_[i].first, path_[i].second) == CELL_OCCUPIED) {
+                    lock.unlock();
+                    if (!replanPath()) {
+                        // Can't get there — give up on this goal
+                        RCLCPP_WARN(get_logger(), "[%s] Path blocked, no replan — abandoning goal",
+                                    robot_id_.c_str());
+                        explorer_->markVisited(goal_x_, goal_y_);
+                        has_goal_ = false;
+                        path_.clear(); path_idx_ = 0;
+                        state_ = returning_to_dock_ ? RobotState::RETURNING : RobotState::EXPLORING;
+                        return;
+                    }
+                    replan_cooldown_ = 5;
+                    break;
+                }
+            }
+            if (replan_cooldown_ == 0) replan_cooldown_ = 3;  // don't check every tick
+        }
+
+        // Skip past any waypoints the robot has already passed (keeps motion
+        // smooth even when the robot overshoots a cell slightly)
+        while (path_idx_ + 1 < path_.size()) {
+            auto [nx, ny] = path_[path_idx_];
+            float wx, wy;
+            grid_->gridToWorld(nx, ny, wx, wy);
+            float dx = wx - static_cast<float>(pose_x_);
+            float dy = wy - static_cast<float>(pose_y_);
+            if (std::hypot(dx, dy) < 0.6f) {
+                ++path_idx_;
+            } else {
+                break;
+            }
+        }
+
+        // Lookahead: aim at the waypoint ~1m ahead, not the one right at the robot
+        size_t aim_idx = path_idx_;
+        for (size_t i = path_idx_; i < path_.size(); ++i) {
+            float wx, wy;
+            grid_->gridToWorld(path_[i].first, path_[i].second, wx, wy);
+            float d = std::hypot(wx - pose_x_, wy - pose_y_);
+            aim_idx = i;
+            if (d > 1.0f) break;
+        }
+
+        auto [cgx, cgy] = path_[aim_idx];
+        float wx, wy;
+        grid_->gridToWorld(cgx, cgy, wx, wy);
+        float dx = wx - static_cast<float>(pose_x_);
+        float dy = wy - static_cast<float>(pose_y_);
+        float dist = std::hypot(dx, dy);
+
+        // Final-goal reach check
+        float final_wx, final_wy;
+        grid_->gridToWorld(path_.back().first, path_.back().second, final_wx, final_wy);
+        float goal_dist = std::hypot(final_wx - pose_x_, final_wy - pose_y_);
+        if (goal_dist < goal_tol_) {
+            path_idx_ = path_.size();  // triggers arrival branch next tick
+            publishPathMarker();
             return;
         }
 
-        // Bug2 navigation
-        constexpr float WALL_THRESH = 1.2f;
-        geometry_msgs::msg::Twist cmd;
-
-        if (nav_mode_ == NavMode::GOAL_SEEK) {
-            // Drive toward goal
-            float bearing = std::atan2(dy, dx);
-            float angle_err = normalizeAngle(bearing - static_cast<float>(pose_theta_));
-
-            if (nearest_front_ < WALL_THRESH) {
-                // Hit a wall — switch to wall following
-                nav_mode_ = NavMode::WALL_FOLLOW;
-                hit_x_ = static_cast<float>(pose_x_);
-                hit_y_ = static_cast<float>(pose_y_);
-                wall_follow_steps_ = 0;
-                RCLCPP_DEBUG(get_logger(), "[%s] Wall hit — following", robot_id_.c_str());
-            } else {
-                // Clear ahead — drive toward goal
-                cmd.angular.z = std::clamp(2.5f * angle_err, -1.5f, 1.5f);
-                cmd.linear.x  = std::clamp(0.6f * dist, 0.0f, 0.7f)
-                                * std::max(0.15f, 1.0f - std::abs(angle_err) / 2.0f);
-                pub_cmd_->publish(cmd);
-                return;
-            }
-        }
-
-        if (nav_mode_ == NavMode::WALL_FOLLOW) {
-            ++wall_follow_steps_;
-
-            float dist_from_hit = std::hypot(
-                static_cast<float>(pose_x_) - hit_x_,
-                static_cast<float>(pose_y_) - hit_y_);
-            bool cleared_hit = dist_from_hit > 2.0f;
-            bool front_clear = nearest_front_ > WALL_THRESH * 1.5f;
-
-            if ((cleared_hit && front_clear) || wall_follow_steps_ > MAX_WALL_FOLLOW) {
-                nav_mode_ = NavMode::GOAL_SEEK;
-                wall_follow_steps_ = 0;
-            } else {
-                if (nearest_front_ < 0.5f) {
-                    cmd.linear.x  = -0.2;
-                    cmd.angular.z = 1.5;
-                } else if (nearest_front_ < 1.0f) {
-                    cmd.linear.x  = 0.2;
-                    cmd.angular.z = 1.0;
-                } else {
-                    cmd.linear.x = 0.45;
-                    float desired_wall = 1.0f;
-                    if (nearest_right_ < desired_wall * 0.6f)
-                        cmd.angular.z = 0.6f;
-                    else if (nearest_right_ > desired_wall * 1.8f)
-                        cmd.angular.z = -0.5f;
-                    else
-                        cmd.angular.z = -0.1f;
-                }
-                pub_cmd_->publish(cmd);
-                return;
-            }
-        }
-
-        // Fallback: goal-seek command
         float bearing = std::atan2(dy, dx);
         float angle_err = normalizeAngle(bearing - static_cast<float>(pose_theta_));
-        cmd.angular.z = std::clamp(2.5f * angle_err, -1.5f, 1.5f);
-        cmd.linear.x  = std::clamp(0.6f * dist, 0.0f, 0.7f)
-                        * std::max(0.15f, 1.0f - std::abs(angle_err) / 2.0f);
+
+        geometry_msgs::msg::Twist cmd;
+
+        // Wall-in-front handling: instead of freezing, reverse a bit and turn
+        // toward the more open side so the robot always escapes.
+        if (nearest_front_ < 0.35f) {
+            ++blocked_ticks_;
+            cmd.linear.x  = -0.15f;
+            cmd.angular.z = (nearest_left_ > nearest_right_) ? 1.2f : -1.2f;
+            pub_cmd_->publish(cmd);
+            publishPathMarker();
+
+            // If we've been blocked for >1s (10 ticks at 10Hz) the current path
+            // is bad — force a replan from the robot's updated pose.
+            if (blocked_ticks_ > 10) {
+                blocked_ticks_ = 0;
+                if (!replanPath()) {
+                    RCLCPP_WARN(get_logger(), "[%s] Wall-blocked, no replan — abandoning goal",
+                                robot_id_.c_str());
+                    explorer_->markVisited(goal_x_, goal_y_);
+                    has_goal_ = false;
+                    path_.clear(); path_idx_ = 0;
+                    state_ = returning_to_dock_ ? RobotState::RETURNING : RobotState::EXPLORING;
+                }
+            }
+            return;
+        }
+        blocked_ticks_ = 0;
+
+        float speed_scale = nearest_front_ < 1.0f ? 0.5f : 1.0f;
+        cmd.angular.z = std::clamp(1.4f * angle_err, -1.0f, 1.0f);
+        float heading_ok = std::max(0.2f, 1.0f - std::abs(angle_err) / 2.5f);
+        cmd.linear.x  = std::clamp(0.6f * dist, 0.25f, 0.6f) * heading_ok * speed_scale;
         pub_cmd_->publish(cmd);
+        publishPathMarker();
     }
 
     void stop()
@@ -693,36 +718,26 @@ private:
         pub_cmd_->publish(zero);
     }
 
-    // ── Battery management ───────────────────────────────────────────
     void drainBattery()
     {
         if (state_ == RobotState::DOCKING) return;
-
         float drain = static_cast<float>(get_parameter("battery_drain_rate").as_double());
-        if (drain <= 0.0f) return;  // FIX #18: guard against zero drain
+        if (drain <= 0.0f) return;
         battery_ = std::max(0.0f, battery_ - drain);
-
-        if (state_ == RobotState::FAILED || state_ == RobotState::RETURNING
-            || returning_to_dock_) return;
-
+        if (state_ == RobotState::FAILED || state_ == RobotState::RETURNING || returning_to_dock_) return;
         auto dock = nearestDock();
         float dock_dist = std::hypot(
             static_cast<float>(pose_x_) - dock.x,
             static_cast<float>(pose_y_) - dock.y);
-        constexpr float AVG_SPEED = 0.25f;
+        constexpr float AVG_SPEED = 0.3f;
         float time_to_return = dock_dist / AVG_SPEED;
         float time_to_empty  = battery_ / drain;
         float safety = static_cast<float>(get_parameter("dock_return_safety").as_double());
-
-        bool predict_stranded = (battery_ < 0.9f) &&
-                                (time_to_return > safety * time_to_empty);
-        bool critically_low   = (battery_ < 0.05f);
-
-        if (predict_stranded || critically_low) {
+        if (((battery_ < 0.9f) && (time_to_return > safety * time_to_empty)) ||
+            battery_ < 0.05f) {
             state_ = RobotState::RETURNING;
             RCLCPP_WARN(get_logger(),
-                "[%s] Returning — battery %.0f%%, %.1fs to dock, %.1fs of charge left",
-                robot_id_.c_str(), battery_ * 100.0f, time_to_return, time_to_empty);
+                "[%s] Returning — battery %.0f%%", robot_id_.c_str(), battery_ * 100.0f);
         }
     }
 };

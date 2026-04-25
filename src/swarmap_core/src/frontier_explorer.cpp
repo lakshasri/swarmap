@@ -53,6 +53,17 @@ std::vector<FrontierCluster> FrontierExplorer::detect(
     // A robot at 20% battery sees frontiers as 1 + 2.0*(1-0.2) = 2.6x more expensive.
     float energy_factor = 1.0f + battery_weight_ * (1.0f - std::clamp(battery, 0.0f, 1.0f));
 
+    // Drop frontiers the robot is literally standing on. Anything at least
+    // one goal_tolerance (~0.6 m) away is reachable.
+    constexpr float MIN_FRONTIER_DIST = 0.6f;
+    clusters.erase(
+        std::remove_if(clusters.begin(), clusters.end(),
+            [robot_wx, robot_wy](const FrontierCluster &c) {
+                return std::hypot(c.centroid_wx - robot_wx,
+                                  c.centroid_wy - robot_wy) < MIN_FRONTIER_DIST;
+            }),
+        clusters.end());
+
     for (auto &cl : clusters) {
         float dwx = cl.centroid_wx - robot_wx;
         float dwy = cl.centroid_wy - robot_wy;

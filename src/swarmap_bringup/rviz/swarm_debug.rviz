@@ -113,6 +113,19 @@ Visualization Manager:
         Value: /swarm/frontier_markers
       Value: true
 
+    # ── Planned A* paths per robot ─────────────────────────────────────────
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Path_R0
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /robot_0/path
+      Value: true
+
     # ── Robot bodies + dock markers ─────────────────────────────────────────
     - Class: rviz_default_plugins/MarkerArray
       Enabled: true

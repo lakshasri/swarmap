@@ -46,6 +46,7 @@ add_executable(robot_node
   src/frontier_explorer.cpp
   src/map_merger.cpp
   src/neighbour_tracker.cpp
+  src/path_planner.cpp
 )
 ament_target_dependencies(robot_node ${DEPS})
 target_include_directories(robot_node PUBLIC
@@ -65,15 +66,6 @@ target_include_directories(map_aggregator_node PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 install(TARGETS map_aggregator_node DESTINATION lib/${PROJECT_NAME})
-
-# ── failure_injector_node ─────────────────────────────────────────────────────
-add_executable(failure_injector_node src/failure_injector_node.cpp)
-ament_target_dependencies(failure_injector_node ${DEPS})
-target_include_directories(failure_injector_node PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
-)
-install(TARGETS failure_injector_node DESTINATION lib/${PROJECT_NAME})
 
 # ── Python nodes (world_sim, swarm_monitor) ───────────────────────────────────
 ament_python_install_package(${PROJECT_NAME})
