@@ -237,6 +237,9 @@ C++ unit tests cover: frontier detection, occupancy grid logic, map merger, and 
 
 ---
 
+## Contributors 
+mars.ciot@pes.edu
+
 ## Project structure
 
 ```
